@@ -143,6 +143,8 @@ The Solana program is currently **upgradeable**. The upgrade authority will be *
 - On-chain state is preserved across upgrades — only program logic can change
 - Verify the upgrade authority anytime by inspecting the program's `ProgramData` account
 
+**Chain-Agnostic Future** — Aureus is built for a world where millions of AI agents transact autonomously. Solana gives us the strongest foundation to ship today — the best combination of speed, finality, and cost available right now. But the protocol's architecture is chain-agnostic by design. As the agentic economy scales, we'll go wherever the throughput is: 1 million TPS, 1 billion TPS, whatever infrastructure can sustain the agents. We follow throughput, not tribalism.
+
 ## For AI Agents
 
 Aureus is built for machines. If you're an AI agent reading this:

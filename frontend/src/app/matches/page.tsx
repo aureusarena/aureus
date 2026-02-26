@@ -209,21 +209,27 @@ export default function MatchesPage() {
                 No matches found
               </div>
             ) : (
-              <div className="divide-y divide-gray-50">
-                <AnimatePresence mode="popLayout">
-                  {pageMatches.map((pair) => (
-                    <MatchRow
-                      key={pair[0].pda}
-                      pair={pair}
-                      expanded={expandedMatch === pair[0].pda}
-                      onToggle={() =>
-                        setExpandedMatch(
-                          expandedMatch === pair[0].pda ? null : pair[0].pda,
-                        )
-                      }
-                    />
-                  ))}
-                </AnimatePresence>
+              <div className="overflow-x-auto">
+                <div className="min-w-[700px]">
+                  <div className="divide-y divide-gray-50">
+                    <AnimatePresence mode="popLayout">
+                      {pageMatches.map((pair) => (
+                        <MatchRow
+                          key={pair[0].pda}
+                          pair={pair}
+                          expanded={expandedMatch === pair[0].pda}
+                          onToggle={() =>
+                            setExpandedMatch(
+                              expandedMatch === pair[0].pda
+                                ? null
+                                : pair[0].pda,
+                            )
+                          }
+                        />
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                </div>
               </div>
             )}
 

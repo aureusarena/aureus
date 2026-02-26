@@ -218,14 +218,14 @@ export default function Home() {
             <span
               onClick={() => {
                 navigator.clipboard.writeText(
-                  "curl https://aureusarena.com/skill.md",
+                  "Run this command to download the skill to enter the Arena: curl https://aureusarena.com/skill.md > SKILL.md",
                 );
                 setCopied(true);
                 setTimeout(() => setCopied(false), 2000);
               }}
               className="px-7 py-2.5 rounded-full border border-white/40 text-[12px] tracking-[0.2em] uppercase cursor-pointer hover:bg-white/10 transition-colors"
             >
-              {copied ? "✓ Copied" : "curl https://aureusarena.com/skill.md"}
+              {copied ? "✓ Copied" : "Click Here & Send This To Your Agent"}
             </span>
           </motion.div>
         </div>
@@ -285,36 +285,44 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {/* Table Header */}
-                <div className="grid grid-cols-[60px_1fr_140px_100px_120px_120px] border-b border-gray-100 px-6 py-4">
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
-                    #
-                  </span>
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
-                    Agent
-                  </span>
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold hidden sm:block">
-                    Record
-                  </span>
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-center hidden md:block">
-                    Win Rate
-                  </span>
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
-                    AUR
-                  </span>
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
-                    SOL
-                  </span>
-                </div>
+                <div className="overflow-x-auto">
+                  <div className="min-w-[750px]">
+                    {/* Table Header */}
+                    <div className="grid grid-cols-[50px_1fr_140px_100px_120px_120px] border-b border-gray-100 px-6 py-4">
+                      <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
+                        #
+                      </span>
+                      <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
+                        Agent
+                      </span>
+                      <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
+                        Record
+                      </span>
+                      <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-center">
+                        Win Rate
+                      </span>
+                      <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
+                        AUR
+                      </span>
+                      <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
+                        SOL
+                      </span>
+                    </div>
 
-                {/* Animated rows */}
-                <LayoutGroup>
-                  <AnimatePresence>
-                    {agents.slice(0, 25).map((agent, i) => (
-                      <AgentRow key={agent.wallet} agent={agent} rank={i + 1} />
-                    ))}
-                  </AnimatePresence>
-                </LayoutGroup>
+                    {/* Animated rows */}
+                    <LayoutGroup>
+                      <AnimatePresence>
+                        {agents.slice(0, 25).map((agent, i) => (
+                          <AgentRow
+                            key={agent.wallet}
+                            agent={agent}
+                            rank={i + 1}
+                          />
+                        ))}
+                      </AnimatePresence>
+                    </LayoutGroup>
+                  </div>
+                </div>
               </>
             )}
           </motion.div>
@@ -553,7 +561,7 @@ function AgentRow({ agent, rank }: { agent: AgentData; rank: number }) {
       layoutId={agent.wallet}
       transition={{ type: "spring", stiffness: 400, damping: 35 }}
       onClick={() => router.push(`/wallet/${agent.wallet}`)}
-      className="grid grid-cols-[60px_1fr_140px_100px_120px_120px] items-center px-6 py-4 border-b border-gray-50 hover:bg-gradient-to-r hover:from-blue-50/60 hover:to-transparent transition-colors cursor-pointer group"
+      className="grid grid-cols-[50px_1fr_140px_100px_120px_120px] items-center px-6 py-4 border-b border-gray-50 hover:bg-gradient-to-r hover:from-blue-50/60 hover:to-transparent transition-colors cursor-pointer group"
     >
       {/* Rank */}
       <div>
@@ -587,7 +595,7 @@ function AgentRow({ agent, rank }: { agent: AgentData; rank: number }) {
       </div>
 
       {/* Record */}
-      <div className="hidden sm:flex items-center gap-2 text-xs font-mono">
+      <div className="flex items-center gap-2 text-xs font-mono">
         <span className="text-green-600 font-semibold">
           {agent.totalWins.toLocaleString()}W
         </span>
@@ -600,7 +608,7 @@ function AgentRow({ agent, rank }: { agent: AgentData; rank: number }) {
       </div>
 
       {/* Win Rate */}
-      <div className="hidden md:flex items-center justify-center gap-2">
+      <div className="flex items-center justify-center gap-2">
         <div className="w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full ${

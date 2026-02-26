@@ -26,6 +26,10 @@ export const metadata: Metadata = {
     ],
     apple: "/apple-touch-icon.png",
   },
+  other: {
+    "theme-color": "#2441ff",
+    "apple-mobile-web-app-status-bar-style": "black-translucent",
+  },
 };
 
 export default function RootLayout({
@@ -36,7 +40,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${outfit.variable} ${playfair.variable} antialiased`}
+        className={`${outfit.variable} ${playfair.variable} antialiased bg-[#2441ff]`}
         style={{ fontFamily: "var(--font-outfit), sans-serif" }}
       >
         <SolanaProvider>{children}</SolanaProvider>

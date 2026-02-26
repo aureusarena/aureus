@@ -273,8 +273,8 @@ export function getRoundInfo(genesis: number, currentSlot: number): RoundInfo {
 /* ─── helpers for display ─── */
 export function lamportsToSol(lamports: number): string {
   return (lamports / 1e9).toLocaleString(undefined, {
-    minimumFractionDigits: 6,
-    maximumFractionDigits: 6,
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
   });
 }
 

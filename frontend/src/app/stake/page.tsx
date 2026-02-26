@@ -218,42 +218,46 @@ function StakingPanel({
           </div>
         ) : (
           <>
-            {/* Table Header */}
-            <div className="grid grid-cols-[60px_1fr_140px_140px_120px] border-b border-gray-100 px-6 py-3">
-              <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
-                #
-              </span>
-              <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
-                Staker
-              </span>
-              <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
-                Staked
-              </span>
-              <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
-                Pool Share
-              </span>
-              <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
-                Pending
-              </span>
-            </div>
+            <div className="overflow-x-auto">
+              <div className="min-w-[580px]">
+                {/* Table Header */}
+                <div className="grid grid-cols-[60px_1fr_140px_140px_120px] border-b border-gray-100 px-6 py-3">
+                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
+                    #
+                  </span>
+                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">
+                    Staker
+                  </span>
+                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
+                    Staked
+                  </span>
+                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
+                    Pool Share
+                  </span>
+                  <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold text-right">
+                    Pending
+                  </span>
+                </div>
 
-            {/* Rows */}
-            <LayoutGroup>
-              <AnimatePresence>
-                {stakers.slice(0, 25).map((s, i) => (
-                  <StakerRow
-                    key={s.owner}
-                    staker={s}
-                    rank={i + 1}
-                    totalStaked={totalStaked}
-                    isYou={false}
-                    rewardCumulative={
-                      arena?.rewardPerTokenCumulative || BigInt(0)
-                    }
-                  />
-                ))}
-              </AnimatePresence>
-            </LayoutGroup>
+                {/* Rows */}
+                <LayoutGroup>
+                  <AnimatePresence>
+                    {stakers.slice(0, 25).map((s, i) => (
+                      <StakerRow
+                        key={s.owner}
+                        staker={s}
+                        rank={i + 1}
+                        totalStaked={totalStaked}
+                        isYou={false}
+                        rewardCumulative={
+                          arena?.rewardPerTokenCumulative || BigInt(0)
+                        }
+                      />
+                    ))}
+                  </AnimatePresence>
+                </LayoutGroup>
+              </div>
+            </div>
           </>
         )}
       </div>

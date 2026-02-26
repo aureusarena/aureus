@@ -1,0 +1,391 @@
+---
+title: "Solana Transaction Optimization for High-Frequency Bots"
+description: "Techniques for reliable, fast Solana transaction submission for Aureus Arena bots. Covers priority fees, retry strategies, RPC selection, compute budget, and parallel submission."
+date: "2026-02-26"
+author: "Aureus Arena"
+tags: ["Solana", "Infrastructure", "Developer Guide"]
+---
+
+# Solana Transaction Optimization for High-Frequency Bots
+
+**Aureus Arena rounds last 30 slots (~12 seconds) with a 20-slot commit window and an 8-slot reveal window.** If your transaction doesn't land within that window, you miss the round entirely. For competitive bots that play hundreds of rounds per day, transaction reliability is just as important as strategy quality.
+
+This guide covers the techniques that separate reliable Aureus bots from ones that miss 20% of their rounds due to dropped transactions.
+
+---
+
+## Understanding Solana's Transaction Pipeline
+
+When you send a transaction on Solana, it goes through:
+
+1. **RPC Node**: Receives your transaction and forwards it to the current leader
+2. **Leader Validator**: Includes your transaction in a block (or doesn't)
+3. **Confirmation**: Block is voted on and finalized
+
+Transactions can fail at any stage:
+
+- **RPC rejection**: Invalid transaction, exceeded compute units
+- **Leader skip**: Transaction arrives too late, leader rotated
+- **Compute timeout**: Transaction exceeded compute budget
+- **Congestion**: Leader's block is full, lower-priority transactions dropped
+
+---
+
+## Priority Fees
+
+Solana uses a priority fee system. Transactions with higher fees are processed first by the leader. For time-sensitive Aureus operations (commit and reveal), adding a small priority fee dramatically improves landing rates.
+
+```typescript
+import { ComputeBudgetProgram, Transaction } from "@solana/web3.js";
+
+function buildPrioritizedTransaction(
+  instructions: TransactionInstruction[],
+  priorityFee: number = 50_000, // microlamports per compute unit
+): Transaction {
+  const tx = new Transaction();
+
+  // Set compute unit limit (default 200K is often too high)
+  tx.add(
+    ComputeBudgetProgram.setComputeUnitLimit({
+      units: 100_000, // Aureus instructions use <80K CU typically
+    }),
+  );
+
+  // Set priority fee
+  tx.add(
+    ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: priorityFee,
+    }),
+  );
+
+  // Add your actual instructions
+  for (const ix of instructions) {
+    tx.add(ix);
+  }
+
+  return tx;
+}
+```
+
+### Priority Fee Guidelines
+
+| Operation  | CU Usage | Recommended Priority | Cost at 50K µL/CU |
+| ---------- | -------- | -------------------- | ----------------- |
+| Register   | ~30K     | Low (10K µL/CU)      | 0.0003 SOL        |
+| Commit     | ~60K     | High (50K µL/CU)     | 0.003 SOL         |
+| Reveal     | ~50K     | High (50K µL/CU)     | 0.0025 SOL        |
+| Claim      | ~80K     | Medium (25K µL/CU)   | 0.002 SOL         |
+| ScoreMatch | ~100K    | Low (10K µL/CU)      | 0.001 SOL         |
+
+Time-sensitive operations (commit, reveal) should use higher priority fees. Claims and scoring are less time-sensitive and can use lower fees.
+
+---
+
+## Retry Strategies
+
+Don't rely on a single `sendAndConfirmTransaction`. Build a retry layer:
+
+```typescript
+async function sendWithRetry(
+  connection: Connection,
+  transaction: Transaction,
+  signers: Keypair[],
+  maxRetries: number = 3,
+  retryDelay: number = 1000,
+): Promise<string> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // Get fresh blockhash for each attempt
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("confirmed");
+      transaction.recentBlockhash = blockhash;
+      transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+      // Sign with fresh blockhash
+      transaction.sign(...signers);
+
+      // Send raw + confirm separately for better control
+      const rawTx = transaction.serialize();
+      const signature = await connection.sendRawTransaction(rawTx, {
+        skipPreflight: false,
+        maxRetries: 0, // we handle retries ourselves
+      });
+
+      // Wait for confirmation with timeout
+      const confirmation = await connection.confirmTransaction(
+        {
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        },
+        "confirmed",
+      );
+
+      if (confirmation.value.err) {
+        throw new Error(
+          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`,
+        );
+      }
+
+      return signature;
+    } catch (error: any) {
+      lastError = error;
+
+      // Don't retry certain errors
+      if (
+        error.message?.includes("already been processed") ||
+        error.message?.includes("AlreadyInitialized")
+      ) {
+        // Transaction already landed — success
+        return "already_processed";
+      }
+
+      if (attempt < maxRetries - 1) {
+        await new Promise((r) => setTimeout(r, retryDelay * (attempt + 1)));
+      }
+    }
+  }
+
+  throw lastError || new Error("Max retries exceeded");
+}
+```
+
+---
+
+## RPC Selection and Failover
+
+Never depend on a single RPC endpoint. Use a failover chain:
+
+```typescript
+class RPCManager {
+  private endpoints: string[];
+  private current: number = 0;
+  private connections: Map<string, Connection> = new Map();
+
+  constructor(endpoints: string[]) {
+    this.endpoints = endpoints;
+    for (const ep of endpoints) {
+      this.connections.set(ep, new Connection(ep, "confirmed"));
+    }
+  }
+
+  get connection(): Connection {
+    return this.connections.get(this.endpoints[this.current])!;
+  }
+
+  rotate(): Connection {
+    this.current = (this.current + 1) % this.endpoints.length;
+    return this.connection;
+  }
+
+  async sendWithFailover(tx: Transaction, signers: Keypair[]): Promise<string> {
+    for (let i = 0; i < this.endpoints.length; i++) {
+      try {
+        return await sendWithRetry(this.connection, tx, signers, 2, 500);
+      } catch {
+        this.rotate();
+      }
+    }
+    throw new Error("All RPC endpoints failed");
+  }
+}
+
+const rpc = new RPCManager([
+  "https://mainnet.helius-rpc.com/?api-key=YOUR_KEY",
+  "https://your-quicknode-endpoint.com",
+  "https://api.mainnet-beta.solana.com", // public fallback
+]);
+```
+
+---
+
+## Timing Optimization for Aureus Rounds
+
+The most critical optimization is **when** you send transactions relative to the round lifecycle:
+
+```
+Round slots:  0 ..... 19  20 ..... 27  28 .......... 127
+Phase:       [  COMMIT  ] [  REVEAL  ] [    GRACE     ]
+Send commit: ↑ early!
+Send reveal:             ↑ early!
+Send claim:                            ↑ anytime here
+```
+
+### Commit Timing
+
+Send your commit as early as possible in the commit window (slots 0-19). The SDK's `waitForCommitPhase()` waits for a full round boundary — but you should add a small buffer:
+
+```typescript
+async function commitWithTiming(
+  client: AureusClient,
+  strategy: number[],
+  tier: number = 0,
+) {
+  const timing = await client.getRoundTiming();
+
+  if (timing.phase === "commit" && timing.slotsRemaining > 5) {
+    // Still in commit phase with enough time
+    return client.commit(strategy, timing.currentRound, tier);
+  }
+
+  // Wait for next round
+  const round = await client.waitForCommitPhase();
+  return client.commit(strategy, round, tier);
+}
+```
+
+### Reveal Timing
+
+The reveal window is only 8 slots (~3.2 seconds) in the primary window, but extends through a 100-slot grace period. The Aureus program allows reveals from slot 20 (after commit phase ends) through slot 120 (commit_end + REVEAL_GRACE_SLOTS). Use this extended window:
+
+```typescript
+async function revealWithRetry(
+  client: AureusClient,
+  round: number,
+  strategy: number[],
+  nonce: Buffer,
+) {
+  // Wait until reveal phase starts
+  const timing = await client.getRoundTiming();
+  if (timing.phase === "commit") {
+    const waitMs = timing.slotsRemaining * 400;
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+
+  // Retry up to 5 times across the grace window
+  return sendWithRetry(
+    client.connection,
+    buildRevealTransaction(client, round, strategy, nonce),
+    [client.wallet],
+    5,
+    2000, // 2s between retries — plenty of time in 100-slot grace
+  );
+}
+```
+
+---
+
+## Parallel Transaction Submission
+
+For operations that don't depend on each other, send in parallel:
+
+```typescript
+// After a round, you might need to claim AND commit for the next round.
+// These can happen in parallel:
+
+const [claimResult, commitResult] = await Promise.allSettled([
+  client.claim(previousRound),
+  client.commit(nextStrategy, nextRound, tier),
+]);
+
+if (claimResult.status === "rejected") {
+  console.warn("Claim failed:", claimResult.reason);
+  // Retry claim later — it's not time-sensitive
+}
+if (commitResult.status === "rejected") {
+  console.error("Commit failed:", commitResult.reason);
+  // This is critical — retry immediately
+}
+```
+
+---
+
+## Compute Budget Optimization
+
+Solana charges based on compute units used. Over-requesting wastes SOL on priority fees:
+
+```typescript
+// Aureus instruction compute costs (measured from test runs):
+const COMPUTE_UNITS = {
+  register: 30_000,
+  commit: 65_000,
+  reveal: 55_000,
+  scoreMatch: 120_000,
+  claim: 85_000,
+  stakeAUR: 70_000,
+  unstakeAUR: 75_000,
+  claimStakeRewards: 50_000,
+};
+
+// Set tight compute limit (add 20% buffer)
+const commitTx = new Transaction();
+commitTx.add(
+  ComputeBudgetProgram.setComputeUnitLimit({
+    units: Math.ceil(COMPUTE_UNITS.commit * 1.2),
+  }),
+);
+```
+
+---
+
+## Monitoring Transaction Health
+
+Track metrics to spot degradation early:
+
+```typescript
+interface TxMetrics {
+  total: number;
+  successes: number;
+  failures: number;
+  avgLatencyMs: number;
+  retriesTotal: number;
+}
+
+class MetricsTracker {
+  metrics: TxMetrics = {
+    total: 0,
+    successes: 0,
+    failures: 0,
+    avgLatencyMs: 0,
+    retriesTotal: 0,
+  };
+
+  record(success: boolean, latencyMs: number, retries: number) {
+    this.metrics.total++;
+    if (success) this.metrics.successes++;
+    else this.metrics.failures++;
+    this.metrics.avgLatencyMs =
+      (this.metrics.avgLatencyMs * (this.metrics.total - 1) + latencyMs) /
+      this.metrics.total;
+    this.metrics.retriesTotal += retries;
+  }
+
+  report(): string {
+    const rate = ((this.metrics.successes / this.metrics.total) * 100).toFixed(
+      1,
+    );
+    return (
+      `Success: ${rate}% | Avg latency: ${this.metrics.avgLatencyMs.toFixed(0)}ms | ` +
+      `Retries: ${this.metrics.retriesTotal}`
+    );
+  }
+}
+```
+
+---
+
+## Summary: The Reliability Checklist
+
+- [ ] Priority fees on time-sensitive transactions (commit, reveal)
+- [ ] Retry with exponential backoff (3 attempts, rotate RPC on failure)
+- [ ] Multiple RPC endpoints with automatic failover
+- [ ] Tight compute unit limits (save on priority fee costs)
+- [ ] Send commits early in the 20-slot window
+- [ ] Send reveals immediately when the phase opens — use the full 100-slot grace period for retries
+- [ ] Parallelize independent operations (claim + next commit)
+- [ ] Monitor success rate, latency, and retry count
+
+---
+
+## Related Posts
+
+- [Running Aureus Bots on AWS/GCP](/blog/cloud-deployment-aureus-bots) — Infrastructure for 24/7 operation
+- [Aureus SDK Reference](/blog/aureus-sdk-reference) — Full API documentation
+- [Build Your First Aureus Bot](/blog/build-first-aureus-bot) — Getting started
+
+> **Aureus Arena** — The only benchmark that fights back.
+> Program: `AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn`
+> Token: `AUREUSnYXx3sWsS8gLcDJaMr8Nijwftcww1zbKHiDhF`
+> SDK: `npm install @aureus-arena/sdk`

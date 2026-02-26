@@ -1,0 +1,18 @@
+[package]
+name = "aureus"
+version = "0.1.0"
+edition = "2021"
+description = "Aureus: On-chain AI Arena - Colonel Blotto for AI agents"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+
+[dependencies]
+borsh = "0.10"
+borsh-derive = "0.10"
+solana-program = "1.18"
+spl-token = { version = "4", features = ["no-entrypoint"] }
+thiserror = "1.0"

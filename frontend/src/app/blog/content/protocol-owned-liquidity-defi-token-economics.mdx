@@ -1,0 +1,123 @@
+---
+title: "How Protocol-Owned Liquidity Changes DeFi Token Economics"
+description: "Protocol-owned liquidity (POL) replaces rental liquidity mining with permanent, protocol-controlled liquidity. Aureus Arena builds POL automatically from match fees using Meteora DLMM."
+date: "2026-02-25"
+author: "Aureus Arena"
+tags: ["DeFi", "Tokenomics", "Liquidity"]
+---
+
+# How Protocol-Owned Liquidity Changes DeFi Token Economics
+
+**Protocol-owned liquidity (POL) is a model where a protocol accumulates and controls its own token liquidity permanently, rather than renting it from external liquidity providers through emissions.** Aureus Arena implements POL natively — every match played in the arena automatically contributes SOL to a growing Meteora DLMM liquidity pool for the AUR/SOL trading pair. No liquidity mining incentives, no mercenary capital, no liquidity that disappears when rewards dry up.
+
+## The Problem with Liquidity Mining
+
+Traditional DeFi protocols bootstrap liquidity by emitting governance tokens to liquidity providers. This creates a well-documented death spiral:
+
+1. **Protocol emits tokens** → LPs deposit capital to farm rewards
+2. **LPs sell farmed tokens** → constant sell pressure craters the token price
+3. **Token price drops** → APY drops → LPs withdraw capital to farm elsewhere
+4. **Liquidity disappears** → spreads widen, price impact increases, users leave
+
+This is rental liquidity. The protocol doesn't own it — it's renting it with inflationary token emissions. The moment rewards stop, liquidity evaporates.
+
+## How Aureus Builds Protocol-Owned Liquidity
+
+Aureus Arena takes a fundamentally different approach. Instead of emitting AUR tokens to incentivize external LPs, the protocol accumulates SOL from match fees and deploys it directly to a Meteora DLMM pool.
+
+### The Revenue Flow
+
+Every match in Aureus Arena generates a pot (0.02 SOL at Tier 1 — Bronze). This pot is split:
+
+| Recipient | Share | Description                              |
+| --------- | ----- | ---------------------------------------- |
+| Winner    | 85%   | Direct SOL transfer from vault           |
+| Protocol  | 10%   | Split into LP, stakers, dev, jackpot     |
+| Jackpot   | 5%    | Accumulates until a lucky round triggers |
+
+The protocol's 10% cut is further divided:
+
+- **40% → LP Fund** (deployed to Meteora AUR/SOL DLMM pool)
+- **30% → Staker Rewards** (distributed to AUR stakers)
+- **20% → Dev Treasury**
+- **10% → Jackpot Boost**
+
+This means **4% of every match pot** flows into the LP fund automatically. For a Tier 1 match, that's 0.0008 SOL per match. At 1,000 matches per day, the LP fund accumulates 0.8 SOL daily — and this scales linearly with arena activity.
+
+### Permissionless Deployment
+
+Once the LP fund exceeds the deployment threshold, **anyone** can trigger liquidity deployment by calling the `DeployLiquidity` instruction. No admin key required. No multisig approval. No governance vote. The transaction is a single atomic operation consisting of three instructions:
+
+1. **DeployLiquidity** — Moves lamports from the SOL vault PDA to the vault's wSOL ATA
+2. **syncNative** — Syncs the wrapped SOL balance to reflect deposited lamports
+3. **ExecuteMeteoraLP** — CPIs into Meteora's `add_liquidity_one_side` with the vault PDA signing
+
+The protocol adds **one-sided SOL liquidity** — it doesn't need to pair SOL with AUR tokens. This avoids diluting AUR supply and uses accumulated SOL efficiently. The SOL goes into bins below the current active price on the DLMM, creating a growing floor of buy-side liquidity.
+
+## Why DLMM Over Constant-Product AMMs
+
+Aureus Arena uses Meteora's Dynamic Liquidity Market Maker (DLMM) — a concentrated liquidity protocol — rather than a traditional x\*y=k AMM. This matters for POL:
+
+| Feature            | Constant-Product AMM           | Meteora DLMM                       |
+| ------------------ | ------------------------------ | ---------------------------------- |
+| Capital Efficiency | Low (spread across all prices) | High (concentrated in active bins) |
+| Fee Capture        | Spread thin                    | Concentrated at active price       |
+| One-Sided Deposit  | Not possible                   | Supported natively                 |
+| Price Impact       | Higher                         | Lower                              |
+
+The concentrated liquidity structure means every SOL the protocol deploys does more work. A DLMM position concentrated around the active price provides the same depth as 10–100× more capital in a constant-product pool.
+
+### Fee Recycling
+
+The deployed DLMM position generates trading fees in both AUR and SOL as traders swap. These fees are collected via the permissionless `ClaimPoolFees` instruction and routed:
+
+- **wSOL fees** → `staker_reward_pool` (distributed to AUR stakers)
+- **AUR fees** → `swap_fee_aur_jackpot` → T1 token jackpot (transferred from vault ATA when triggered)
+
+This creates a second revenue stream for stakers beyond direct match protocol fees — and feeds back into the jackpot system for competitive players.
+
+## POL vs Liquidity Mining: A Comparison
+
+| Factor               | Liquidity Mining                    | Aureus POL                      |
+| -------------------- | ----------------------------------- | ------------------------------- |
+| **Liquidity Source** | External LPs (mercenary capital)    | Protocol revenue (permanent)    |
+| **Cost**             | Token inflation                     | Zero additional emission        |
+| **Permanence**       | Temporary (leaves when rewards end) | Permanent (protocol owns it)    |
+| **Sell Pressure**    | High (LPs sell farmed tokens)       | None (no token incentives)      |
+| **Admin Control**    | Usually multisig-controlled         | Permissionless deployment       |
+| **Scales With**      | Token emission rate                 | Arena activity and match volume |
+
+## The Sustainability Argument
+
+The key advantage of Aureus's POL model is **sustainability**. The liquidity floor only grows — it can never shrink because the protocol owns the DLMM position through the vault PDA. Private keys never touch LP funds. The position is non-custodial and trustless.
+
+As long as matches are being played, SOL flows into the LP fund. As long as the LP fund exceeds the threshold, anyone can deploy it. The result is a constantly deepening liquidity floor funded entirely by arena activity.
+
+This also means AUR's liquidity is directly correlated with its utility. More bots competing → more matches → more LP fund growth → deeper liquidity for AUR → better trading experience → more demand for AUR → more bots competing. It's a self-reinforcing flywheel.
+
+## Security Properties
+
+The POL system inherits the security properties of the underlying Solana program:
+
+- **Trustless** — All instructions are permissionless. No admin key can redirect funds.
+- **Atomic** — The 3-instruction deploy transaction either fully succeeds or fully reverts.
+- **Non-custodial** — The vault PDA owns the DLMM position directly. No delegation.
+- **Front-running resistant** — LP deployment uses accumulated protocol funds, not user tokens.
+- **No dilution** — One-sided SOL liquidity means no extra AUR is minted for LP purposes.
+
+## What This Means for AUR Holders
+
+For anyone earning or holding AUR, the POL mechanism provides three concrete benefits:
+
+1. **Growing buy-side support** — Every match deepens the SOL-side liquidity, creating a rising price floor.
+2. **Reduced slippage** — Concentrated DLMM liquidity means better execution when trading AUR.
+3. **Passive income** — Staked AUR earns a share of LP trading fees via the `staker_reward_pool`, on top of direct protocol revenue.
+
+Only 2% of the total match pot (the dev treasury share) actually leaves the Aureus ecosystem. The other 13% flows directly back to participants through jackpots, staking rewards, and LP seeding.
+
+---
+
+> **Aureus Arena** — The only benchmark that fights back.
+> Program: `AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn`
+> Token: `AUREUSnYXx3sWsS8gLcDJaMr8Nijwftcww1zbKHiDhF`
+> SDK: `npm install @aureus-arena/sdk`

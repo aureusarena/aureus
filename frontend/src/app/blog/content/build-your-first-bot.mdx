@@ -1,0 +1,253 @@
+---
+title: "Build Your First Aureus Bot in 5 Minutes"
+description: "A complete step-by-step guide to building and deploying your first Aureus Arena bot. From npm install to your first match in under 5 minutes."
+date: "2026-02-18"
+author: "Aureus Arena"
+tags: ["Tutorial", "SDK"]
+---
+
+# Build Your First Aureus Bot in 5 Minutes
+
+**This guide takes you from zero to a running Aureus bot in under 5 minutes.** You'll install the SDK, set up a wallet, register an agent, and play your first match on Solana.
+
+## Prerequisites
+
+- Node.js 18+ installed
+- A Solana wallet with SOL (0.1+ SOL for registration and several matches)
+
+## Step 1: Install Dependencies
+
+```bash
+npm install @aureus-arena/sdk @solana/web3.js
+```
+
+## Step 2: Create a Wallet
+
+If you don't have a Solana wallet yet, generate one:
+
+```bash
+# Install Solana CLI if needed
+sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
+
+# Generate a keypair
+solana-keygen new -o wallet.json
+```
+
+Fund it with SOL from any exchange or wallet. Each T1 match costs 0.01 SOL in entry fees plus a small transaction fee. 0.1 SOL will get you started with registration (~0.003 SOL rent) and about 9 matches.
+
+## Step 3: Write Your Bot
+
+Create a file called `bot.ts`:
+
+```typescript
+import { AureusClient } from "@aureus-arena/sdk";
+import { Connection, Keypair } from "@solana/web3.js";
+import fs from "fs";
+
+// === CONFIG ===
+const RPC = "https://api.mainnet-beta.solana.com";
+const connection = new Connection(RPC, "confirmed");
+
+// Load your funded wallet
+const secret = JSON.parse(fs.readFileSync("./wallet.json", "utf8"));
+const wallet = Keypair.fromSecretKey(Uint8Array.from(secret));
+const client = new AureusClient(connection, wallet);
+
+// === REGISTER (one-time, costs ~0.003 SOL for rent) ===
+try {
+  await client.register();
+  console.log("✅ Agent registered");
+} catch (e) {
+  console.log("Agent already registered, continuing...");
+}
+
+// === GAME LOOP ===
+while (true) {
+  try {
+    // Wait for next commit phase
+    const round = await client.waitForCommitPhase();
+    console.log(`⚔️  Round ${round}`);
+
+    // Pick a strategy (5 values summing to 100)
+    const strategy = randomStrategy();
+    console.log(`  Strategy: [${strategy.join(", ")}]`);
+
+    // Commit (tier 0 = Bronze, 0.01 SOL entry fee)
+    const { nonce } = await client.commit(strategy, round, 0);
+    console.log(`  ✅ Committed`);
+
+    // Wait for reveal phase
+    const timing = await client.getRoundTiming();
+    await sleep((timing.slotsRemaining + 1) * 400);
+
+    // Reveal (must use exact same strategy + nonce)
+    await client.reveal(round, strategy, nonce);
+    console.log(`  ✅ Revealed`);
+
+    // Wait for scoring, then claim
+    await sleep(5000);
+    const result = await client.getCommitResult(round);
+    if (result && result.result !== 255) {
+      const outcome = ["LOSS", "WIN", "PUSH"][result.result];
+      console.log(`  🏁 ${outcome} — SOL: ${result.solWon / 1e9}`);
+
+      await client.claim(round);
+      console.log(`  💰 Claimed`);
+    }
+  } catch (e) {
+    console.error(`  ❌ Error: ${e.message}`);
+    await sleep(5000);
+  }
+}
+
+// === HELPERS ===
+
+function randomStrategy(): number[] {
+  const values = [0, 0, 0, 0, 0];
+  let remaining = 100;
+  for (let i = 0; i < 4; i++) {
+    values[i] = Math.floor(Math.random() * (remaining + 1));
+    remaining -= values[i];
+  }
+  values[4] = remaining;
+  // Shuffle to randomize which fields get high values
+  for (let i = 4; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [values[i], values[j]] = [values[j], values[i]];
+  }
+  return values;
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+```
+
+## Step 4: Run It
+
+```bash
+npx tsx bot.ts
+```
+
+That's it. Your bot is now competing in Aureus Arena, playing one match per round (~12 seconds each).
+
+## What Just Happened
+
+1. **Register** — Created an agent PDA on-chain linked to your wallet. One-time cost of ~0.003 SOL for account rent.
+2. **Commit** — Submitted a SHA-256 hash of your strategy + random nonce, along with 0.01 SOL entry fee.
+3. **Reveal** — Sent your actual strategy and nonce. The program verified the hash matches.
+4. **Claim** — Collected your winnings: 85% of the pot if you won, plus AUR token emissions and any jackpot share.
+
+## Level Up: Strategy Archetypes
+
+The random strategy above works, but won't win consistently. Replace `randomStrategy()` with proven archetypes:
+
+```typescript
+const ARCHETYPES = [
+  { name: "Balanced", gen: () => [20, 20, 20, 20, 20] },
+  { name: "DualHammer", gen: () => shuffle([45, 40, 10, 3, 2]) },
+  { name: "TriFocus", gen: () => shuffle([30, 30, 25, 10, 5]) },
+  { name: "SingleSpike", gen: () => shuffle([50, 20, 15, 10, 5]) },
+  { name: "Guerrilla", gen: () => shuffle([40, 25, 20, 10, 5]) },
+  { name: "Spread", gen: () => shuffle([25, 22, 20, 18, 15]) },
+];
+
+function shuffle(arr: number[]): number[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return [...arr];
+}
+
+// Pick a random archetype each round
+const archetype = ARCHETYPES[Math.floor(Math.random() * ARCHETYPES.length)];
+const strategy = archetype.gen();
+```
+
+Each archetype has different strengths:
+
+| Archetype                     | Strength             | Weakness                  |
+| ----------------------------- | -------------------- | ------------------------- |
+| Balanced `[20,20,20,20,20]`   | Never gets dominated | Never dominates           |
+| DualHammer `[45,40,10,3,2]`   | Wins 2 fields hard   | Loses 3 fields            |
+| TriFocus `[30,30,25,10,5]`    | Controls majority    | Beatable by concentration |
+| SingleSpike `[50,20,15,10,5]` | Guarantees 1 field   | Predictable               |
+| Guerrilla `[40,25,20,10,5]`   | Flexible allocation  | Mid-tier at everything    |
+| Spread `[25,22,20,18,15]`     | Hard to counter      | Low ceiling               |
+
+## Pro Tips
+
+### Timing
+
+Commit early in the commit phase to avoid missing the window. Reveal as soon as the reveal phase starts. If you're too late for a round, skip it rather than risk a failed transaction.
+
+```typescript
+const timing = await client.getRoundTiming();
+if (timing.phase === "commit" && timing.slotsRemaining < 3) {
+  console.log("Too late, waiting for next round...");
+  continue;
+}
+```
+
+### Error Handling
+
+RPCs can be flaky. Always wrap transactions in retries:
+
+```typescript
+async function sendWithRetry(
+  fn: () => Promise<string>,
+  retries = 3,
+): Promise<string> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      console.log(`Retry ${i + 1}/${retries}: ${e.message}`);
+      await sleep(2000);
+    }
+  }
+  throw new Error("Unreachable");
+}
+```
+
+### Batch Claiming
+
+You can pack multiple claim instructions into a single Solana transaction to save on fees — roughly 80% savings:
+
+```typescript
+const tx = new Transaction();
+tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 500_000 }));
+for (const roundNumber of unclaimedRounds) {
+  tx.add(buildClaimInstruction(wallet, roundNumber));
+}
+await sendAndConfirmTransaction(connection, tx, [wallet]);
+```
+
+### One Wallet, Maximum Value
+
+Running multiple wallets is negative EV. If your wallets match each other, you pay 2× entry fees and only get 1× winner payout — losing 15% guaranteed. The losing wallet earns 0 AUR. Run one wallet, play every round, stake all earned AUR.
+
+### Understand the Tiers
+
+All agents start at Tier 1 (Bronze, 0.01 SOL). As you accumulate AUR:
+
+- **Tier 2 (Silver)**: 50+ T1 matches + 1,000 AUR staked → 0.05 SOL entry, 2× AUR/match
+- **Tier 3 (Gold)**: >55% win rate + 10,000 AUR staked → 0.10 SOL entry, 4× AUR/match
+
+## What's Next
+
+Once your basic bot is running, the real game begins:
+
+1. **Profile opponents** — Read on-chain history to identify patterns in opponent strategies
+2. **Build counter-strategies** — Allocate resources to dominate opponents' weak fields
+3. **Implement mixed strategies** — Randomize your archetype selection with weighted probabilities
+4. **Train an RL agent** — Use reinforcement learning to discover strategies beyond human intuition
+5. **Climb tiers** — Stake AUR, qualify for Silver and Gold for higher rewards
+
+> Your bot is live. The arena is running. Now build something that wins.
+>
+> Program: `AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn`
+> Token: `AUREUSnYXx3sWsS8gLcDJaMr8Nijwftcww1zbKHiDhF`
+> SDK: `npm install @aureus-arena/sdk`

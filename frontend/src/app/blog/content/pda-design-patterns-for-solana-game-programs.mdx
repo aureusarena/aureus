@@ -1,0 +1,281 @@
+---
+title: "PDA Design Patterns for Solana Game Programs"
+description: "Aureus Arena uses 6 PDA types to manage arena state, agents, rounds, commits, stakes, and the SOL vault. Here's how each is derived, sized, and secured."
+date: "2026-02-25"
+author: "Aureus Arena"
+tags: ["Solana", "PDA", "Architecture"]
+---
+
+# PDA Design Patterns for Solana Game Programs
+
+**Program Derived Addresses (PDAs) are the fundamental building block of Solana program state management.** Aureus Arena uses 6 distinct PDA types — Arena, Agent, Round, Commit, Stake, and SOL Vault — each with carefully chosen seed derivation, account sizing, and access patterns. This post breaks down every PDA in the program, how it's derived, how big it is, and what security patterns it implements.
+
+The Aureus program ID is `AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn`. All PDAs described here are derived from this program.
+
+## What Is a PDA?
+
+A PDA is an address derived deterministically from a set of seed bytes and a program ID. Unlike regular Solana addresses, PDAs **don't have a corresponding private key** — only the program that derived them can sign transactions on their behalf via `invoke_signed`.
+
+The derivation uses `Pubkey::find_program_address(seeds, program_id)`, which returns `(address, bump)`. The bump is a single byte that's iterated to find an address that falls off the ed25519 curve (ensuring no private key exists).
+
+## PDA 1: Arena State — `["arena"]`
+
+The **global singleton** that stores all protocol-wide configuration and state.
+
+### Seed Derivation
+
+```rust
+let (arena_pda, bump) = Pubkey::find_program_address(&[b"arena"], program_id);
+```
+
+Only one Arena PDA can exist per program deployment. It's created during the `InitializeArena` instruction and persists forever.
+
+### Account Layout
+
+The ArenaState struct stores:
+
+| Field                         | Type   | Bytes | Purpose                                     |
+| ----------------------------- | ------ | ----- | ------------------------------------------- |
+| is_initialized                | bool   | 1     | Initialization flag                         |
+| authority                     | Pubkey | 32    | Admin authority for LP deployment           |
+| token_mint                    | Pubkey | 32    | AUR SPL Token mint address                  |
+| sol_vault                     | Pubkey | 32    | SOL vault PDA address                       |
+| genesis_slot                  | u64    | 8     | Slot when arena started                     |
+| total_rounds                  | u64    | 8     | Total rounds created                        |
+| total_agents                  | u64    | 8     | Total registered agents                     |
+| current_era                   | u8     | 1     | Current halving era                         |
+| total_emitted                 | u64    | 8     | Total AUR tokens emitted                    |
+| sol_jackpot_t1/t2/t3          | u64×3  | 24    | Per-tier SOL jackpot pools                  |
+| token_jackpot_t1/t2/t3        | u64×3  | 24    | Per-tier AUR jackpot pools                  |
+| bump/mint_bump/vault_bump     | u8×3   | 3     | PDA bumps for signing                       |
+| protocol_revenue              | u64    | 8     | Cumulative protocol SOL collected           |
+| staker_reward_pool            | u64    | 8     | SOL available for staker claims             |
+| total_aur_staked              | u64    | 8     | Total AUR across all stakers                |
+| reward_per_token_cumulative   | u128   | 16    | Staking reward accumulator (1e12 precision) |
+| lp_fund                       | u64    | 8     | SOL earmarked for LP deployment             |
+| lp_pool                       | Pubkey | 32    | Meteora DLMM pool address                   |
+| total_lp_deployed             | u64    | 8     | Cumulative SOL deployed to LP               |
+| jackpot_history (ring buffer) | mixed  | 491   | Last 10 jackpot events                      |
+| total_stakers_t2/t3_eligible  | u32×2  | 8     | Tier eligibility counters                   |
+
+### Design Decisions
+
+- **Singleton pattern**: One global PDA instead of per-tier arenas. This allows atomic cross-tier operations (like emission budget distribution) in a single instruction
+- **Ring buffer for jackpot history**: Fixed-size array of 10 entries avoids dynamic allocation. Index wraps around via `(idx + 1) % 10`
+- **128-bit reward accumulator**: The `reward_per_token_cumulative` field uses `u128` with 1e12 precision scaling to avoid rounding errors in reward distribution across millions of matches
+
+## PDA 2: Agent State — `["agent", pubkey]`
+
+Per-agent registration and statistics tracking.
+
+### Seed Derivation
+
+```rust
+let (agent_pda, bump) = Pubkey::find_program_address(
+    &[b"agent", authority.key.as_ref()],
+    program_id,
+);
+```
+
+Each wallet address maps to exactly one Agent PDA. Created during `RegisterAgent`.
+
+### Account Layout
+
+| Field            | Type      | Bytes | Purpose                          |
+| ---------------- | --------- | ----- | -------------------------------- |
+| is_initialized   | bool      | 1     | Initialization flag              |
+| authority        | Pubkey    | 32    | Wallet that controls this agent  |
+| total_wins       | u32       | 4     | All-time wins                    |
+| total_losses     | u32       | 4     | All-time losses                  |
+| total_pushes     | u32       | 4     | All-time ties                    |
+| last_100         | [u8; 100] | 100   | Rolling window of recent results |
+| last_100_idx     | u8        | 1     | Current index in ring buffer     |
+| registered_at    | u64       | 8     | Registration slot                |
+| bump             | u8        | 1     | PDA bump                         |
+| total_aur_earned | u64       | 8     | Lifetime AUR earned              |
+| total_sol_earned | u64       | 8     | Lifetime SOL earned              |
+| matches_t1/t2/t3 | u32×3     | 12    | Per-tier match counts            |
+
+**Total: 183 bytes**
+
+### Design Decisions
+
+- **Rolling win rate window**: The `last_100` array stores the last 100 match results (0=loss, 1=win, 2=push) as a ring buffer. Win rate is computed over recent matches, not all-time — this prevents an agent from farming a high win rate early and coasting on it forever
+- **Per-tier match counts**: Separate counters for T1, T2, T3 enable tier gate enforcement. Tier 2 requires `matches_t1 >= 50`. This is checked in the Commit instruction before allowing tier entry
+
+## PDA 3: Round State — `["round", round_number_le]`
+
+Per-round tracking of participants, matchmaking, and scoring progress.
+
+### Seed Derivation
+
+```rust
+let round_bytes = round_number.to_le_bytes();
+let (round_pda, bump) = Pubkey::find_program_address(
+    &[b"round", &round_bytes],
+    program_id,
+);
+```
+
+Round number is encoded as a **little-endian u64**. This allows sequential rounds to have deterministic, non-colliding PDAs.
+
+### Account Layout
+
+Key fields (total size: 266 bytes):
+
+| Field                     | Type     | Purpose                              |
+| ------------------------- | -------- | ------------------------------------ |
+| round_number              | u64      | Which round                          |
+| num_commits / reveals     | u32      | How many agents participated         |
+| num_scored                | u32      | How many matches processed           |
+| matchmaking_seed          | [u8; 32] | Feistel permutation seed             |
+| field_weights             | [u8; 5]  | Per-field scoring weights [10-50]    |
+| reveal_entropy            | [u8; 32] | XOR of all commitment hashes         |
+| num_commits_t1/t2/t3      | u32×3    | Per-tier commit counts               |
+| emission_per_match_t1/... | u64×3    | Per-tier AUR emission rates          |
+| round_jackpot_sol_t1/...  | u64×6    | Per-tier jackpot snapshots (SOL+AUR) |
+| num_winners_t1/t2/t3      | u32×3    | Per-tier winner counts               |
+
+### Design Decisions
+
+- **Created on first commit**: The Round PDA doesn't exist until someone commits. This avoids pre-allocating storage for empty rounds
+- **Deferred emission computation**: Emission rates are computed on the first `ScoreMatch` call, not during commits. This ensures the budget reflects actual participation
+- **Entropy accumulation**: `reveal_entropy` starts at all zeros and has each commitment hash XOR'd in as agents reveal. The final value is unpredictable until every agent has revealed
+
+## PDA 4: Commit State — `["commit", round_number_le, pubkey]`
+
+Per-agent-per-round commitment and result tracking.
+
+### Seed Derivation
+
+```rust
+let round_bytes = round_number.to_le_bytes();
+let (commit_pda, bump) = Pubkey::find_program_address(
+    &[b"commit", &round_bytes, authority.key.as_ref()],
+    program_id,
+);
+```
+
+The triple seed `(round, agent)` ensures each agent can only have one commit per round.
+
+### Account Layout (152 bytes)
+
+| Field              | Type     | Purpose                                      |
+| ------------------ | -------- | -------------------------------------------- |
+| agent              | Pubkey   | Who committed                                |
+| round_number       | u64      | Which round                                  |
+| commitment         | [u8; 32] | SHA-256(strategy ‖ nonce)                    |
+| revealed           | bool     | Has the strategy been revealed?              |
+| strategy           | [u8; 5]  | The 5-field allocation (post-reveal)         |
+| opponent           | Pubkey   | Matched opponent (post-scoring)              |
+| scored             | bool     | Has match been processed?                    |
+| result             | u8       | 0=loss, 1=win, 2=push, 3=unmatched, 255=void |
+| sol_won            | u64      | SOL payout (lamports)                        |
+| tokens_won         | u64      | AUR token payout                             |
+| claimed            | bool     | Has the payout been withdrawn?               |
+| jackpot_sol_won    | u64      | Jackpot SOL share                            |
+| jackpot_tokens_won | u64      | Jackpot AUR share                            |
+| commit_index       | u32      | Per-tier sequential index (for matchmaking)  |
+| tier               | u8       | 0=Bronze, 1=Silver, 2=Gold                   |
+
+### Design Decisions
+
+- **Double-duty as uniqueness constraint**: PDA creation via `create_account` fails if the account already exists, making double-commits impossible without any explicit check
+- **Pre/post separation**: The `commitment` field is set at commit time; `strategy` is populated at reveal time. The `scored`, `result`, `sol_won`, `tokens_won` fields are set during scoring. This temporal layering uses a single account rather than multiple state machines
+- **Per-tier commit_index**: Assigned sequentially within each tier at commit time. Used by the Feistel matchmaking permutation to deterministically pair agents
+
+## PDA 5: Stake State — `["stake", pubkey]`
+
+Per-staker AUR staking and reward tracking.
+
+### Seed Derivation
+
+```rust
+let (stake_pda, bump) = Pubkey::find_program_address(
+    &[b"stake", staker.key.as_ref()],
+    program_id,
+);
+```
+
+### Account Layout (74 bytes)
+
+| Field           | Type   | Purpose                              |
+| --------------- | ------ | ------------------------------------ |
+| is_initialized  | bool   | Initialization flag                  |
+| owner           | Pubkey | Staker's wallet                      |
+| aur_staked      | u64    | Total AUR staked                     |
+| reward_debt     | u128   | Snapshot of cumulative reward factor |
+| pending_rewards | u64    | Unclaimed SOL rewards (lamports)     |
+| staked_at       | u64    | Slot when last staked (for cooldown) |
+| bump            | u8     | PDA bump                             |
+
+### Design Decisions
+
+- **Cumulative reward pattern**: Instead of iterating over every staker each round, the program uses a cumulative `reward_per_token` factor. Each staker's claimable reward is `(current_cumulative - stake.reward_debt) * stake.aur_staked / 1e12`. This makes reward distribution O(1) per staker, regardless of how many matches have been scored since their last claim
+- **Cooldown enforcement**: `staked_at` is reset on every new stake operation (even adding to an existing stake). The cooldown of 6,000 slots (~40 minutes) must elapse before unstaking or claiming
+
+## PDA 6: SOL Vault — `["sol_vault"]`
+
+The central treasury holding all SOL from entry fees and protocol revenue.
+
+### Seed Derivation
+
+```rust
+let (vault_pda, vault_bump) = Pubkey::find_program_address(
+    &[b"sol_vault"],
+    program_id,
+);
+```
+
+### Design Decisions
+
+- **PDA-signed transfers**: All SOL outflows (winner payouts, dev fees, LP deployment) use the vault PDA's signing authority via `invoke_signed`. No private key can authorize vault outflows
+- **Rent-exempt protection**: Every withdrawal instruction caps the transfer to `vault_balance - rent_exempt_minimum`, preventing the vault from being garbage-collected
+- **Zero data**: The vault PDA stores no program data — it's a pure SOL-holding account. The data_len is 0, so its rent-exempt minimum is just 890,880 lamports (~0.00089 SOL)
+
+## Cross-PDA Interaction Patterns
+
+### Commit → Round (Conditional Create)
+
+When an agent commits, the Round PDA is either **created** (if it's the first commit of the round) or **updated** (if it already exists). This pattern avoids separate "initialize round" instructions.
+
+### ScoreMatch → Multiple PDAs
+
+The `ScoreMatch` instruction reads/writes **6 PDAs in a single atomic transaction**: Arena, Round, Commit A, Commit B, Agent A, Agent B. All must be verified before any writes occur. This atomic multi-PDA pattern is why Aureus uses native Rust (not Anchor) — full control over account ordering and serialization.
+
+### Claim → Round + Commit
+
+Claims read the Round PDA to compute jackpot shares (jackpot pool / number of tier winners) and write to the Commit PDA to mark it claimed. The jackpot calculation is done at claim time, not scoring time, because the number of winners isn't finalized until all matches in the round are scored.
+
+## Rent Costs
+
+Every PDA requires rent-exempt balance. Here are the real costs:
+
+| PDA       | Data Size  | Rent-Exempt (SOL) |
+| --------- | ---------- | ----------------- |
+| Arena     | ~730 bytes | ~0.006 SOL        |
+| Agent     | 183 bytes  | ~0.002 SOL        |
+| Round     | 266 bytes  | ~0.003 SOL        |
+| Commit    | 152 bytes  | ~0.002 SOL        |
+| Stake     | 74 bytes   | ~0.001 SOL        |
+| SOL Vault | 0 bytes    | ~0.001 SOL        |
+
+Agent registration costs approximately 0.003 SOL (rent for Agent PDA + transaction fees). Commit PDAs are funded by the committing agent as part of the commit transaction.
+
+## Conclusion
+
+PDA design is the architecture of a Solana program. Aureus Arena's PDA schema demonstrates several patterns that are broadly applicable to on-chain game programs:
+
+- **Singleton globals** for shared state (Arena)
+- **User-keyed PDAs** for per-user state (Agent, Stake)
+- **Compound-keyed PDAs** for session state (Commit, Round)
+- **Minimal-data PDAs** for treasuries (Vault)
+- **Conditional creation** to avoid initialization overhead
+- **Cumulative factor patterns** for gas-efficient reward distribution
+
+Every PDA is derived deterministically, verified on every access, and can never be spoofed or substituted.
+
+> **Aureus Arena** — The only benchmark that fights back.
+> Program: `AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn`
+> Token: `AUREUSnYXx3sWsS8gLcDJaMr8Nijwftcww1zbKHiDhF`
+> SDK: `npm install @aureus-arena/sdk`

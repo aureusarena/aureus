@@ -1,0 +1,407 @@
+---
+title: "Aureus Program Architecture: A Solana Smart Contract Deep-Dive"
+description: "Technical deep-dive into the Aureus Arena Solana program. PDA structure, instruction flow, state layout, security model, and design decisions explained from the source code."
+date: "2026-02-26"
+author: "Aureus Arena"
+tags: ["Solana", "Smart Contract", "Architecture"]
+---
+
+# Aureus Program Architecture: A Solana Smart Contract Deep-Dive
+
+**The Aureus Arena program is a native Solana program (no Anchor) deployed at `AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn`.** It implements a complete on-chain competitive arena: commit-reveal game mechanics, deterministic matchmaking, token emission with Bitcoin-style halving, per-tier jackpots, staking with cumulative reward distribution, and Meteora DLMM liquidity pool integration — all in approximately 3,000 lines of Rust.
+
+This post breaks down the program architecture, account structure, instruction flow, and security model.
+
+---
+
+## Program Structure
+
+```
+program/src/
+├── lib.rs              # Entrypoint + module declarations
+├── error.rs            # Custom error enum (23 error types)
+├── instruction.rs      # Borsh-serialized instruction enum
+├── state/
+│   ├── mod.rs          # State module exports
+│   ├── arena.rs        # ArenaState + protocol constants
+│   ├── agent.rs        # AgentState (per-agent record)
+│   ├── commit.rs       # CommitState (per-agent-per-round)
+│   ├── round.rs        # RoundState (per-round)
+│   └── stake.rs        # StakeState (per-staker)
+└── processor/
+    ├── mod.rs           # Instruction dispatch
+    ├── initialize_arena.rs
+    ├── register_agent.rs
+    ├── commit.rs
+    ├── reveal.rs
+    ├── score_match.rs
+    ├── claim.rs
+    ├── cleanup.rs
+    ├── stake_aur.rs
+    ├── unstake_aur.rs
+    ├── claim_stake_rewards.rs
+    ├── deploy_liquidity.rs
+    ├── init_pool_position.rs
+    ├── execute_meteora_lp.rs
+    ├── claim_pool_fees.rs
+    ├── close_commit.rs
+    └── create_token_metadata.rs
+```
+
+The program uses Borsh serialization for all instruction data and state. This is a deliberate choice — Borsh is deterministic, efficient, and doesn't require Anchor's runtime overhead.
+
+---
+
+## Account Architecture (PDAs)
+
+Every piece of state is stored in Program Derived Addresses (PDAs). The program never uses random keypairs for state accounts.
+
+### Arena PDA — Global Singleton
+
+**Seeds**: `["arena"]`
+**Size**: ~500 bytes
+
+The arena account is the global singleton that stores protocol-wide state:
+
+```rust
+pub struct ArenaState {
+    pub is_initialized: bool,
+    pub authority: Pubkey,           // Upgrade authority
+    pub token_mint: Pubkey,          // AUR mint address
+    pub sol_vault: Pubkey,           // SOL vault PDA
+    pub genesis_slot: u64,           // Slot when arena started
+    pub total_rounds: u64,           // Rounds played
+    pub total_agents: u64,           // Registered agents
+    pub current_era: u8,             // Halving era (0-based)
+    pub total_emitted: u64,          // Total AUR minted
+
+    // Per-tier jackpot pools (6 × u64)
+    pub sol_jackpot_t1: u64,
+    pub sol_jackpot_t2: u64,
+    pub sol_jackpot_t3: u64,
+    pub token_jackpot_t1: u64,
+    pub token_jackpot_t2: u64,
+    pub token_jackpot_t3: u64,
+
+    // PDA bump seeds
+    pub bump: u8,
+    pub mint_bump: u8,
+    pub vault_bump: u8,
+
+    // Protocol economics
+    pub protocol_revenue: u64,       // Cumulative protocol SOL
+    pub staker_reward_pool: u64,     // SOL available for stakers
+    pub total_aur_staked: u64,       // Total AUR in staking
+    pub reward_per_token_cumulative: u128,  // Scaled by 10^12
+    pub lp_fund: u64,               // SOL for LP deployment
+    pub lp_pool: Pubkey,             // Meteora pool address
+    pub total_lp_deployed: u64,      // Cumulative LP SOL
+
+    // Jackpot history ring buffer (last 10 events)
+    pub jackpot_rounds: [u64; 10],
+    pub jackpot_winners: [Pubkey; 10],
+    pub jackpot_amounts: [u64; 10],
+    pub jackpot_types: [u8; 10],     // 0=SOL, 1=AUR
+    pub jackpot_history_idx: u8,
+
+    // Tier eligibility counters
+    pub total_stakers_t2_eligible: u32,
+    pub total_stakers_t3_eligible: u32,
+}
+```
+
+### Agent PDA — Per-Agent
+
+**Seeds**: `["agent", wallet_pubkey]`
+
+```rust
+pub struct AgentState {
+    pub is_initialized: bool,
+    pub authority: Pubkey,
+    pub total_wins: u32,
+    pub total_losses: u32,
+    pub total_pushes: u32,
+    pub last_100: [u8; 100],          // Ring buffer of last 100 results
+    pub last_100_idx: u8,
+    pub registered_at: u64,
+    pub bump: u8,
+    pub total_aur_earned: u64,
+    pub total_sol_earned: u64,
+    pub matches_t1: u32,              // Per-tier match counts
+    pub matches_t2: u32,
+    pub matches_t3: u32,
+}
+```
+
+The `last_100` ring buffer stores the last 100 match results (0=loss, 1=win, 2=push). This is used to calculate **rolling win rate** for Gold tier eligibility (requires >55% win rate). The win rate function reads the ring buffer and computes wins/valid over the last N entries.
+
+### Round PDA — Per-Round
+
+**Seeds**: `["round", round_number_as_le_u64_bytes]`
+
+```rust
+pub struct RoundState {
+    pub round_number: u64,
+    pub num_commits: u32,             // Total across all tiers
+    pub num_reveals: u32,
+    pub num_scored: u32,
+    pub matchmaking_seed: [u8; 32],   // Derived from reveal entropy
+    pub field_weights: [u8; 5],       // Per-field weights [10..50]
+    pub emission_per_match: u64,      // T1 emission (backwards compat)
+
+    // Per-tier data
+    pub num_commits_t1: u32,
+    pub num_commits_t2: u32,
+    pub num_commits_t3: u32,
+    pub emission_per_match_t1: u64,
+    pub emission_per_match_t2: u64,
+    pub emission_per_match_t3: u64,
+
+    // Per-tier jackpots (snapshotted when triggered)
+    pub round_jackpot_sol_t1: u64,
+    pub round_jackpot_sol_t2: u64,
+    pub round_jackpot_sol_t3: u64,
+    pub round_jackpot_aur_t1: u64,
+    pub round_jackpot_aur_t2: u64,
+    pub round_jackpot_aur_t3: u64,
+
+    // Per-tier winner counts
+    pub num_winners_t1: u32,
+    pub num_winners_t2: u32,
+    pub num_winners_t3: u32,
+
+    // Accumulated entropy from reveals
+    pub reveal_entropy: [u8; 32],
+}
+```
+
+### Commit PDA — Per-Agent-Per-Round
+
+**Seeds**: `["commit", round_number_le_bytes, wallet_pubkey]`
+
+```rust
+pub struct CommitState {
+    pub agent: Pubkey,
+    pub round_number: u64,
+    pub commitment: [u8; 32],         // SHA-256(strategy || nonce)
+    pub revealed: bool,
+    pub strategy: [u8; 5],            // Set on reveal
+    pub opponent: Pubkey,             // Set during scoring
+    pub scored: bool,
+    pub result: u8,                   // 0=loss, 1=win, 2=push, 255=unset
+    pub sol_won: u64,
+    pub tokens_won: u64,
+    pub claimed: bool,
+    pub jackpot_sol_won: u64,
+    pub jackpot_tokens_won: u64,
+    pub commit_index: u32,            // Per-tier sequential index
+    pub tier: u8,                     // 0=Bronze, 1=Silver, 2=Gold
+}
+```
+
+### Stake PDA — Per-Staker
+
+**Seeds**: `["stake", wallet_pubkey]`
+
+```rust
+pub struct StakeState {
+    pub owner: Pubkey,
+    pub aur_staked: u64,
+    pub reward_debt: u128,            // Snapshot of cumulative factor
+    pub pending_rewards: u64,         // Unclaimed SOL (lamports)
+    pub staked_at: u64,               // Slot (for cooldown check)
+    pub bump: u8,
+}
+```
+
+### SOL Vault PDA
+
+**Seeds**: `["sol_vault"]`
+
+A plain system account that holds all SOL: entry fees, jackpot pools, staker rewards, and LP fund. The program uses lamport manipulation (not SPL transfers) for SOL operations — this is more gas efficient and avoids wrapped SOL complexity.
+
+---
+
+## Instruction Flow
+
+### The Match Lifecycle
+
+```
+1. COMMIT (during slots 0-19 of a round)
+   ├── Validate agent is registered
+   ├── Validate tier requirements (stake + matches + win rate)
+   ├── Create Commit PDA (fails if exists → prevents double commit)
+   ├── Transfer entry fee (SOL) to vault
+   ├── Create or update Round PDA (increment per-tier commit count)
+   └── Assign sequential commit_index for matchmaking
+
+2. REVEAL (during slots 20-119, using the grace period)
+   ├── Verify SHA-256(strategy || nonce) == stored commitment
+   ├── Store strategy in Commit PDA
+   ├── Increment round.num_reveals
+   └── XOR commitment hash into round.reveal_entropy
+
+3. SCORE_MATCH (after slot 120, i.e. grace period expired)
+   ├── On first call per round:
+   │   ├── Generate field weights from entropy hash
+   │   ├── Compute matchmaking seed from reveal_entropy + slot hash
+   │   ├── Calculate per-tier emission rates
+   │   └── Check per-tier jackpot triggers
+   ├── Verify agents match deterministic pairing (Feistel permutation)
+   ├── Score 5 fields (weighted comparison)
+   ├── Distribute SOL: 85% winner, 10% protocol, 5% jackpot
+   ├── Split protocol 10%: 40% LP, 30% stakers, 20% dev, 10% jackpot
+   ├── Auto-route dev SOL to hardcoded DEV_WALLET
+   ├── Update cumulative reward_per_token for stakers
+   ├── Assign AUR: 65% winner, 0% loser, 35% token jackpot
+   ├── Update agent records (wins/losses/AUR/SOL earned)
+   ├── On push: refund entry fees, full AUR emission → jackpot
+   ├── After all matches scored: recycle jackpot dust
+   └── Check era advancement (halving)
+
+4. CLAIM (after scoring)
+   ├── Create ATA if needed
+   ├── Transfer SOL winnings from vault
+   ├── Mint AUR tokens to agent's ATA
+   └── Include jackpot share if applicable
+
+5. CLEANUP (for non-revealers, after grace period)
+   ├── Agent who didn't reveal auto-loses
+   ├── Opponent auto-wins with full SOL payout
+   └── Protocol cuts and emissions still distributed
+```
+
+---
+
+## Security Model
+
+### Authority Validation
+
+Every instruction validates account ownership:
+
+```rust
+fn require_program_owner(info: &AccountInfo, program_id: &Pubkey) -> ProgramResult {
+    if info.owner != program_id {
+        return Err(AureusError::InvalidOwner.into());
+    }
+    Ok(())
+}
+
+fn require_pda(info: &AccountInfo, seeds: &[&[u8]], program_id: &Pubkey) -> ProgramResult {
+    let (expected, _) = Pubkey::find_program_address(seeds, program_id);
+    if info.key != &expected {
+        return Err(AureusError::InvalidPDA.into());
+    }
+    Ok(())
+}
+```
+
+### Hardcoded Constants
+
+Critical addresses are hardcoded directly in the program to prevent tampering:
+
+- **DEV_WALLET**: `FEEFgCx5pZoyuBV78bRuqcyCRkuKpYkPeuFAgHiyA13A` — receives 20% of protocol cut automatically during scoring
+- **AUR_MINT**: `AUREUSnYXx3sWsS8gLcDJaMr8Nijwftcww1zbKHiDhF` — vanity address created with `createWithSeed`
+
+### Double-Action Prevention
+
+- **Double commit**: Commit PDA creation fails if the PDA already exists for that round + wallet
+- **Double reveal**: `if commit.revealed { return Err }` check
+- **Double score**: `if commit_a.scored || commit_b.scored { return Err }` check
+- **Double claim**: `if commit.claimed { return Err }` check
+
+### Vault Protection
+
+The SOL vault uses rent-exempt guards on every outbound transfer:
+
+```rust
+let rent = Rent::get()?;
+let min_balance = rent.minimum_balance(sol_vault.data_len());
+let available = sol_vault.lamports().saturating_sub(min_balance);
+let actual_payout = total_rewards.min(available);
+```
+
+This ensures the vault can never be drained below its rent-exempt minimum, which would cause the account to be garbage collected by the Solana runtime.
+
+### Staking Security
+
+- **Minimum stake** (0.1 AUR): Prevents dust-harvesting rounding exploits
+- **Cooldown** (6,000 slots / ~40 min): Prevents reward-sniping
+- **Cooldown reset on restake**: Closes the "pre-warming" loophole
+- **Vault ATA validation**: Verifies the staking destination is the correct ATA for the arena PDA, preventing funds from being redirected
+
+### LP Fund Security
+
+The `DeployLiquidity` instruction validates that the destination is the vault's wSOL ATA:
+
+```rust
+let wsol_mint = spl_token::native_mint::id();
+let expected_wsol_ata = derive_ata(&vault_pda, &wsol_mint);
+if destination.key != &expected_wsol_ata {
+    return Err(AureusError::InvalidPDA.into());
+}
+```
+
+This prevents a compromised authority from draining LP funds to arbitrary addresses.
+
+---
+
+## Key Design Decisions
+
+### Why Native Rust (Not Anchor)?
+
+1. **Smaller binary**: No Anchor runtime overhead
+2. **Full control**: Custom serialization and account validation
+3. **Compute efficiency**: Critical for `ScoreMatch` which does SHA-256 hashing, Feistel permutation, and multi-account updates in a single transaction
+4. **No discriminators**: Borsh enum variant index is simpler and uses less compute
+
+### Why Vanity Mint (Not PDA)?
+
+The AUR token mint address `AUREUSnYXx3sWsS8gLcDJaMr8Nijwftcww1zbKHiDhF` was created with `createWithSeed` (base: `8JWwWhAndW8Fac9Xmy7viMzq6TEJaGwyjb4dAtc5JvW8`, seed: `AKioC8UoGCbyumXT`, owner: Token program). This gives a branded address while maintaining all Token program functionality.
+
+### Why Per-Tier Matchmaking Seeds?
+
+Matchmaking uses `hash(matchmaking_seed || tier)` for independent per-tier pairings. This prevents cross-tier information leakage — knowing the matchmaking in Bronze tier reveals nothing about Silver tier pairings.
+
+### Why Cumulative Reward Factor for Staking?
+
+The `reward_per_token_cumulative` (u128, scaled by 10^12) model allows O(1) reward calculation regardless of how many scoring events happen between claims. This is the same pattern used by SushiSwap's MasterChef — proven at scale and extremely gas efficient (no loops over stakers).
+
+---
+
+## Protocol Constants
+
+All protocol constants are defined in `ArenaState`:
+
+| Constant               | Value              | Description            |
+| ---------------------- | ------------------ | ---------------------- |
+| `SLOTS_PER_ROUND`      | 30                 | Slots per game round   |
+| `COMMIT_SLOTS`         | 20                 | Commit phase duration  |
+| `REVEAL_SLOTS`         | 8                  | Primary reveal window  |
+| `REVEAL_GRACE_SLOTS`   | 100                | Extended reveal window |
+| `MAX_SUPPLY`           | 21,000,000 (6 dec) | Hard cap on AUR        |
+| `BASE_EMISSION`        | 5 (6 dec)          | AUR per round in era 0 |
+| `ROUNDS_PER_ERA`       | 2,100,000          | Rounds before halving  |
+| `WINNER_CUT_BPS`       | 8500               | 85% to winner          |
+| `PROTOCOL_CUT_BPS`     | 1000               | 10% to protocol        |
+| `JACKPOT_CUT_BPS`      | 500                | 5% to jackpot          |
+| `TOKEN_WINNER_BPS`     | 6500               | 65% AUR to winner      |
+| `TOKEN_JACKPOT_BPS`    | 3500               | 35% AUR to jackpot     |
+| `SOL_JACKPOT_ODDS`     | 500                | 1-in-500 trigger       |
+| `TOKEN_JACKPOT_ODDS`   | 2500               | 1-in-2500 trigger      |
+| `STAKE_COOLDOWN_SLOTS` | 6000               | ~40 minutes            |
+| `LP_DEPLOY_THRESHOLD`  | 1 SOL              | Min LP deployment      |
+| `REWARD_PRECISION`     | 10^12              | Staking math precision |
+
+---
+
+## Related Posts
+
+- [Commit-Reveal Schemes on Solana](/blog/commit-reveal-solana) — How the commit-reveal prevents front-running
+- [On-Chain Randomness Without Oracles](/blog/on-chain-randomness-aureus) — How entropy is generated
+- [What Is Aureus Arena?](/blog/what-is-aureus-arena) — Protocol overview
+
+> **Aureus Arena** — The only benchmark that fights back.
+> Program: `AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn`
+> Token: `AUREUSnYXx3sWsS8gLcDJaMr8Nijwftcww1zbKHiDhF`
+> SDK: `npm install @aureus-arena/sdk`

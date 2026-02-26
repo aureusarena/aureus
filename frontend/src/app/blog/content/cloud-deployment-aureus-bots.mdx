@@ -1,0 +1,297 @@
+---
+title: "Running Aureus Bots on AWS/GCP: Cloud Deployment Guide"
+description: "Deploy your Aureus Arena bot for 24/7 operation on AWS EC2 or GCP Cloud Run. Covers PM2 process management, RPC selection, monitoring, and cost optimization."
+date: "2026-02-26"
+author: "Aureus Arena"
+tags: ["Infrastructure", "Deployment", "Developer Guide"]
+---
+
+# Running Aureus Bots on AWS/GCP: Cloud Deployment Guide
+
+**Aureus Arena operates 24/7 with 30-slot rounds (~12 seconds each).** To compete consistently and never miss rounds, your bot needs always-on infrastructure. This guide covers deploying your Aureus bot to AWS EC2 or GCP Cloud Run, with PM2 for process management, health monitoring, and cost optimization.
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────┐
+│         Your Bot Process         │
+│  ┌──────────────────────────┐   │
+│  │  Game Loop               │   │
+│  │  - waitForCommitPhase()  │   │
+│  │  - commit()              │───┼──► Solana RPC
+│  │  - reveal()              │   │    (mainnet-beta)
+│  │  - claim()               │   │
+│  └──────────────────────────┘   │
+│  ┌──────────────────────────┐   │
+│  │  PM2 Process Manager     │   │    ┌──────────┐
+│  │  - Auto-restart          │───┼───►│ CloudWatch│
+│  │  - Log rotation          │   │    │ or GCP    │
+│  │  - Resource monitoring   │   │    │ Logging   │
+│  └──────────────────────────┘   │    └──────────┘
+└─────────────────────────────────┘
+```
+
+---
+
+## Option 1: AWS EC2
+
+### Instance Selection
+
+| Instance Type | vCPUs | RAM  | Monthly Cost | Notes                                 |
+| ------------- | ----- | ---- | ------------ | ------------------------------------- |
+| `t3.micro`    | 2     | 1 GB | ~$8          | Free tier eligible, handles 1-2 bots  |
+| `t3.small`    | 2     | 2 GB | ~$16         | Comfortable for 2-4 bots              |
+| `t3.medium`   | 2     | 4 GB | ~$32         | Room for RL inference + multiple bots |
+
+For a basic bot, **t3.micro is sufficient**. The bot spends most of its time waiting (400ms polling loops). CPU spikes only during SHA-256 commitment hashing and transaction signing.
+
+### Setup
+
+```bash
+# Launch EC2 with Amazon Linux 2023
+# Security group: allow outbound HTTPS (443) only
+
+# SSH into your instance
+ssh -i your-key.pem ec2-user@your-instance-ip
+
+# Install Node.js 18+
+curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+sudo yum install nodejs -y
+
+# Install PM2 globally
+sudo npm install -g pm2
+
+# Clone your bot repository
+git clone https://your-repo/aureus-bot.git
+cd aureus-bot
+npm install
+
+# Copy your wallet keypair securely
+# NEVER commit wallet.json to git
+scp -i your-key.pem wallet.json ec2-user@your-instance-ip:~/aureus-bot/
+chmod 600 wallet.json
+```
+
+### PM2 Configuration
+
+Create `ecosystem.config.cjs`:
+
+```javascript
+module.exports = {
+  apps: [
+    {
+      name: "aureus-bot",
+      script: "bot.js",
+      interpreter: "node",
+      args: "", // no args = run forever
+      env: {
+        AUREUS_RPC: "https://api.mainnet-beta.solana.com",
+        AUREUS_WALLET: "./wallet.json",
+        NODE_ENV: "production",
+      },
+      // Restart on crash with exponential backoff
+      max_restarts: 50,
+      min_uptime: "10s",
+      restart_delay: 5000,
+      exp_backoff_restart_delay: 1000,
+      // Log management
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      error_file: "./logs/error.log",
+      out_file: "./logs/output.log",
+      merge_logs: true,
+      // Resource limits
+      max_memory_restart: "500M",
+    },
+  ],
+};
+```
+
+```bash
+# Start the bot
+pm2 start ecosystem.config.cjs
+
+# Monitor
+pm2 monit
+
+# View logs
+pm2 logs aureus-bot --lines 100
+
+# Auto-start on boot
+pm2 startup
+pm2 save
+```
+
+---
+
+## Option 2: GCP Cloud Run (Container-Based)
+
+For fully managed, auto-scaling deployment:
+
+### Dockerfile
+
+```dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --production
+
+COPY bot.js .
+# Wallet injected via Secret Manager (see below)
+
+ENV AUREUS_RPC=https://api.mainnet-beta.solana.com
+CMD ["node", "bot.js"]
+```
+
+### Deploy
+
+```bash
+# Build and push
+gcloud builds submit --tag gcr.io/your-project/aureus-bot
+
+# Deploy with always-on (min instances = 1)
+gcloud run deploy aureus-bot \
+  --image gcr.io/your-project/aureus-bot \
+  --platform managed \
+  --region us-central1 \
+  --memory 512Mi \
+  --cpu 1 \
+  --min-instances 1 \
+  --max-instances 1 \
+  --no-allow-unauthenticated \
+  --set-secrets "AUREUS_WALLET=aureus-wallet:latest"
+```
+
+### Wallet Security on GCP
+
+```bash
+# Store wallet in Secret Manager
+gcloud secrets create aureus-wallet \
+  --data-file=wallet.json
+
+# Grant access to the Cloud Run service account
+gcloud secrets add-iam-policy-binding aureus-wallet \
+  --member="serviceAccount:your-project@appspot.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+---
+
+## RPC Selection
+
+The RPC endpoint is critical for bot performance. Aureus rounds are only 30 slots (~12 seconds), so latency matters.
+
+| Provider          | Latency   | Rate Limits | Monthly Cost | Notes                                         |
+| ----------------- | --------- | ----------- | ------------ | --------------------------------------------- |
+| Solana Public RPC | 100-500ms | 10-40 req/s | Free         | Rate limited, unreliable for competitive play |
+| Helius            | 20-50ms   | 50+ req/s   | $49+         | Dedicated nodes available                     |
+| QuickNode         | 20-80ms   | 25+ req/s   | $49+         | Good WebSocket support                        |
+| Triton (RPC Pool) | 10-30ms   | Custom      | $99+         | Lowest latency, used by traders               |
+
+**Recommendation**: Use a paid RPC with dedicated endpoints for competitive play. The public RPC drops transactions during network congestion.
+
+```bash
+# Set RPC in environment
+export AUREUS_RPC=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+```
+
+---
+
+## Monitoring
+
+### Health Check Script
+
+```bash
+#!/bin/bash
+# health_check.sh — run via cron every 5 minutes
+
+BOT_STATUS=$(pm2 jlist | jq '.[0].pm2_env.status')
+WALLET_BALANCE=$(solana balance --url mainnet-beta $(solana-keygen pubkey wallet.json) | cut -d' ' -f1)
+
+# Alert if bot is not running
+if [ "$BOT_STATUS" != '"online"' ]; then
+  curl -X POST "https://your-webhook-url" \
+    -d "content=⚠️ Aureus bot is DOWN! Status: $BOT_STATUS"
+fi
+
+# Alert if wallet balance is low
+if (( $(echo "$WALLET_BALANCE < 0.05" | bc -l) )); then
+  curl -X POST "https://your-webhook-url" \
+    -d "content=⚠️ Wallet balance low: $WALLET_BALANCE SOL"
+fi
+```
+
+```bash
+# Add to crontab
+crontab -e
+# */5 * * * * /home/ec2-user/aureus-bot/health_check.sh
+```
+
+### Key Metrics to Track
+
+- **Win rate** (rolling 100 rounds): Target >50%
+- **SOL balance**: Must stay above entry fees. Each Bronze match costs 0.01 SOL plus ~0.001 SOL in transaction fees.
+- **Transaction success rate**: If below 95%, your RPC might be congested.
+- **Rounds missed**: If your bot skips rounds, check RPC latency and commit timing.
+- **AUR earnings**: Track cumulative AUR to monitor strategy effectiveness.
+
+---
+
+## Cost Optimization
+
+### AWS Spot Instances
+
+For 70-90% savings, use spot instances with persistence:
+
+```bash
+# Request a persistent spot instance
+aws ec2 request-spot-instances \
+  --spot-price "0.004" \
+  --instance-count 1 \
+  --type "persistent" \
+  --launch-specification '{
+    "ImageId": "ami-xxx",
+    "InstanceType": "t3.micro",
+    "KeyName": "your-key"
+  }'
+```
+
+**Risk**: Spot instances can be terminated with 2-minute notice. Your bot will miss a few rounds during restart. PM2's auto-restart handles the recovery.
+
+### Estimated Monthly Costs
+
+| Component       | AWS EC2 (t3.micro)                    | GCP Cloud Run    |
+| --------------- | ------------------------------------- | ---------------- |
+| Compute         | $8 (on-demand) / $2 (spot)            | $15              |
+| RPC             | $0-49                                 | $0-49            |
+| SOL for matches | ~$15 (150 T1 games/day = 1.5 SOL/day) | Same             |
+| **Total**       | **$25-72/month**                      | **$30-79/month** |
+
+The dominant cost is SOL for entry fees. If your bot has a >50% win rate, match winnings offset entry costs.
+
+---
+
+## Security Checklist
+
+- [ ] Wallet private key **never** committed to git
+- [ ] Wallet file permissions set to `600` (owner read/write only)
+- [ ] EC2 security group allows **only outbound HTTPS** (no inbound SSH from 0.0.0.0/0)
+- [ ] Use IAM roles instead of access keys where possible
+- [ ] Separate wallet for the bot — don't use your main wallet
+- [ ] Keep only enough SOL in the bot wallet for ~1 day of play
+- [ ] Set up balance alerts so you refill before running dry
+
+---
+
+## Related Posts
+
+- [Aureus SDK Reference](/blog/aureus-sdk-reference) — API for building your bot
+- [Solana Transaction Optimization](/blog/solana-transaction-optimization) — Make your transactions faster and more reliable
+- [Using the Aureus MCP Server](/blog/aureus-mcp-server-claude-cursor) — Build bots with AI coding assistants
+
+> **Aureus Arena** — The only benchmark that fights back.
+> Program: `AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn`
+> Token: `AUREUSnYXx3sWsS8gLcDJaMr8Nijwftcww1zbKHiDhF`
+> SDK: `npm install @aureus-arena/sdk`

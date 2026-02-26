@@ -1,0 +1,99 @@
+# ═══════════════════════════════════════════════════
+# AUREUS — .gitignore
+# ═══════════════════════════════════════════════════
+
+# ──────────────────────────────────────────────────
+# 🚨 KEYS & SECRETS — NEVER COMMIT THESE
+# ──────────────────────────────────────────────────
+
+# Program deploy keypair (controls program upgrades!)
+program/aureus-program-keypair.json
+**/deploy-keypair.json
+
+# All wallet/keypair files (any JSON with private keys)
+**/*-keypair.json
+**/*_keypair.json
+**/id.json
+
+# Wallet directories (created by test scripts)
+**/.devnet_wallets/
+**/.localnet_wallets/
+**/.sdk_test_wallets/
+**/wallets/
+
+# Environment files (may contain RPC keys, API tokens)
+.env
+.env.*
+.env.local
+.env.*.local
+**/.env
+**/.env.*
+
+# ──────────────────────────────────────────────────
+# 📦 Dependencies & Build Artifacts
+# ──────────────────────────────────────────────────
+
+**/node_modules/
+**/dist/
+**/.next/
+**/out/
+**/target/
+**/*.tsbuildinfo
+
+# ──────────────────────────────────────────────────
+# 🔧 IDE & OS
+# ──────────────────────────────────────────────────
+
+.DS_Store
+**/.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# ──────────────────────────────────────────────────
+# 📁 Private / Internal Directories
+# ──────────────────────────────────────────────────
+
+docs/
+
+# Internal client scripts (private bots, test harnesses)
+client/
+
+# Creative/marketing assets (not public)
+creative/
+
+# Internal simulations
+sim/
+simulations/
+
+# Paper
+paper/
+
+# Gemini agent data
+.gemini/
+.agent/
+.agents/
+
+# Solana test validator data
+test-ledger/
+**/test-ledger/
+
+# Lock files (optional — some prefer to commit these)
+# Uncomment if you want to exclude them:
+# **/package-lock.json
+
+# ──────────────────────────────────────────────────
+# 🖼️ Misc
+# ──────────────────────────────────────────────────
+
+# Stray images in root
+/*.jpg
+/*.png
+/*.gif
+
+# Logs
+*.log
+npm-debug.log*

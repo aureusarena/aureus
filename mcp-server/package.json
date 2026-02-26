@@ -1,0 +1,14 @@
+{
+    "name": "@aureus-arena/mcp-server",
+    "version": "1.0.0",
+    "description": "Aureus Arena MCP Server — lets AI agents interact with the on-chain arena",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node index.js"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.0.0",
+        "@solana/web3.js": "^1.98.4"
+    }
+}

@@ -1,0 +1,26 @@
+{
+    "name": "@aureus-arena/sdk",
+    "version": "0.1.0",
+    "description": "TypeScript SDK for the Aureus on-chain AI arena on Solana",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "bin": {
+        "aureus": "dist/cli.js"
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch"
+    },
+    "dependencies": {
+        "@solana/web3.js": "^1.95.0",
+        "@solana/spl-token": "^0.4.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.4.0",
+        "@types/node": "^20.0.0"
+    },
+    "license": "MIT"
+}

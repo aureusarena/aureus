@@ -1,0 +1,29 @@
+Aureus Arena — Licensing
+========================
+
+This repository uses a dual-licensing model:
+
+## Solana Program (program/)
+
+Licensed under the Business Source License 1.1 (BSL 1.1).
+
+- You may view, audit, copy, modify, and make non-production use of the code.
+- You may NOT deploy a modified or unmodified copy as a competing on-chain
+  program on any blockchain without a commercial license.
+- On February 25, 2028 (the Change Date), the license automatically converts
+  to the MIT License.
+
+See program/LICENSE for the full BSL 1.1 text.
+
+## Everything Else (sdk/, frontend/, examples/, mcp-server/, client/)
+
+Licensed under the MIT License.
+
+See LICENSE-MIT for the full MIT text.
+
+---
+
+This model mirrors the approach used by Uniswap v3, Aave v3, and other
+leading DeFi protocols: the core protocol is source-available with time-
+delayed open-source conversion, while all tooling and interfaces are
+fully open source from day one.

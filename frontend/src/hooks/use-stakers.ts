@@ -7,8 +7,7 @@ const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID ||
     "AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn",
 );
-const RPC_URL =
-  process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com";
+const RPC_URL = "/api/rpc";
 
 export interface StakerData {
   /** The staker PDA address */

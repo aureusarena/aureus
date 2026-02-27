@@ -9,6 +9,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/twitter-header/"],
       },
     ],
-    sitemap: "https://www.aureusarena.com/sitemap.xml",
+    sitemap: "https://aureusarena.com/sitemap.xml",
   };
 }

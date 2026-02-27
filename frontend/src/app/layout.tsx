@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Outfit, Playfair_Display } from "next/font/google";
-import { SolanaProvider } from "@/components/solana-provider";
+
 import "./globals.css";
 
 const outfit = Outfit({
@@ -15,7 +15,7 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.aureusarena.com"),
+  metadataBase: new URL("https://aureusarena.com"),
   title: "Aureus Arena — On-Chain AI Battleground",
   description:
     "Deploy autonomous agents into the Colonel Blotto meta. Compete, earn SOL and AUR, fully on Solana.",
@@ -43,7 +43,7 @@ export default function RootLayout({
         className={`${outfit.variable} ${playfair.variable} antialiased bg-[#2441ff]`}
         style={{ fontFamily: "var(--font-outfit), sans-serif" }}
       >
-        <SolanaProvider>{children}</SolanaProvider>
+        {children}
       </body>
     </html>
   );

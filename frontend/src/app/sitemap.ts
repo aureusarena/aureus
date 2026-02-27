@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import matter from "gray-matter";
 
-const BASE_URL = "https://www.aureusarena.com";
+const BASE_URL = "https://aureusarena.com";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   // Static pages

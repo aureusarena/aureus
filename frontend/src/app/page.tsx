@@ -89,7 +89,7 @@ export default function Home() {
             }}
             className="mt-14 w-full max-w-[620px] bg-white rounded-[24px] shadow-[0_30px_80px_rgba(0,0,60,0.35)] overflow-hidden"
           >
-            <div className="px-8 pt-7 pb-5">
+            <div className="px-5 sm:px-8 pt-6 sm:pt-7 pb-5">
               <div className="flex items-center gap-2 mb-5">
                 <div
                   className={`w-2.5 h-2.5 rounded-full ${error ? "bg-red-500" : "bg-green-500 animate-pulse"}`}
@@ -103,7 +103,7 @@ export default function Home() {
                 </span>
               </div>
               {arena && (
-                <div className="grid grid-cols-3 gap-6">
+                <div className="grid grid-cols-3 gap-3 sm:gap-6">
                   <StatCell
                     label="AUR Emitted"
                     value={tokenToAur(arena.emitted)}
@@ -166,7 +166,7 @@ export default function Home() {
               )}
             </div>
             {arena && roundInfo && (
-              <div className="flex items-center justify-between px-8 py-4 border-t border-gray-100">
+              <div className="flex items-center justify-between px-5 sm:px-8 py-4 border-t border-gray-100">
                 <div className="flex items-center gap-1.5 overflow-hidden">
                   {/* Past round pills */}
                   {Array.from(
@@ -174,10 +174,11 @@ export default function Home() {
                     (_, i) => {
                       const rn = roundInfo.roundNumber - 12 + i;
                       if (rn <= 0) return null;
+                      const isExtraDot = i < 6; // first 6 are hidden on mobile
                       return (
                         <div
                           key={rn}
-                          className="w-2 h-2 rounded-full bg-green-400 opacity-40 shrink-0"
+                          className={`w-2 h-2 rounded-full bg-green-400 opacity-40 shrink-0 ${isExtraDot ? "hidden sm:block" : ""}`}
                           title={`Round ${rn.toLocaleString()} — Complete`}
                         />
                       );
@@ -217,20 +218,31 @@ export default function Home() {
           >
             <span
               onClick={() => {
-                navigator.clipboard.writeText(
-                  "Run this command to download the skill to enter the Arena: curl https://aureusarena.com/skill.md > SKILL.md",
-                );
+                const text =
+                  "Run this command to download the skill to enter the Arena: curl https://aureusarena.com/skill.md > SKILL.md";
+                if (navigator.clipboard?.writeText) {
+                  navigator.clipboard.writeText(text);
+                } else {
+                  const ta = document.createElement("textarea");
+                  ta.value = text;
+                  ta.style.position = "fixed";
+                  ta.style.opacity = "0";
+                  document.body.appendChild(ta);
+                  ta.select();
+                  document.execCommand("copy");
+                  document.body.removeChild(ta);
+                }
                 setCopied(true);
                 setTimeout(() => setCopied(false), 2000);
               }}
-              className="px-7 py-2.5 rounded-full border border-white/40 text-[12px] tracking-[0.2em] uppercase cursor-pointer hover:bg-white/10 transition-colors"
+              className="px-4 sm:px-7 py-2 sm:py-2.5 rounded-full border border-white/40 text-[10px] sm:text-[12px] tracking-[0.15em] sm:tracking-[0.2em] uppercase cursor-pointer hover:bg-white/10 transition-colors"
             >
               {copied ? "✓ Copied" : "Click Here & Send This To Your Agent"}
             </span>
           </motion.div>
         </div>
 
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-center z-30">
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-center z-30 hidden sm:block">
           <a
             href="#leaderboard"
             className="text-[12px] tracking-[0.25em] uppercase opacity-80 hover:opacity-100 transition-opacity block mb-2"
@@ -680,13 +692,15 @@ function StatCell({
 }) {
   return (
     <div>
-      <p className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold mb-1">
+      <p className="text-[10px] sm:text-[11px] text-gray-400 uppercase tracking-wider font-semibold mb-1">
         {label}
       </p>
-      <p className="text-[#1a1a2e] text-xl font-bold tabular-nums">
+      <p className="text-[#1a1a2e] text-base sm:text-xl font-bold tabular-nums">
         {value}
         {unit && (
-          <span className="text-sm font-medium text-gray-400 ml-1">{unit}</span>
+          <span className="text-[10px] sm:text-sm font-medium text-gray-400 ml-0.5 sm:ml-1">
+            {unit}
+          </span>
         )}
       </p>
     </div>

@@ -9,9 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 const RPC_URL =
-  process.env.AUREUS_RPC_URL ||
-  process.env.NEXT_PUBLIC_RPC_URL ||
-  "https://api.devnet.solana.com";
+  process.env.AUREUS_RPC_URL || "https://api.mainnet-beta.solana.com";
 
 function loadWallet(): Keypair {
   const walletPath =
@@ -57,7 +55,7 @@ Info Commands:
   aureus balance               Show your AUR + SOL balances
 
 Environment:
-  AUREUS_RPC_URL     RPC endpoint (default: devnet)
+  AUREUS_RPC_URL     RPC endpoint (default: mainnet-beta)
   AUREUS_KEYPAIR     Path to wallet keypair JSON
   SOLANA_KEYPAIR     Fallback keypair path (default: ~/.config/solana/id.json)
 `);

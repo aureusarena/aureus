@@ -2,12 +2,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
+import { getRpcUrl } from "@/lib/rpc";
 
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID ||
     "AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn",
 );
-const RPC_URL = "/api/rpc";
 
 export interface AgentData {
   /** The wallet pubkey that owns this agent */
@@ -100,14 +100,14 @@ function deserializeAgent(d: Buffer, pda: string): AgentData | null {
   };
 }
 
-export function useAgentLeaderboard(pollMs = 5000) {
+export function useAgentLeaderboard(pollMs = 30000) {
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchAgents = useCallback(async () => {
     try {
-      const connection = new Connection(RPC_URL, "confirmed");
+      const connection = new Connection(getRpcUrl(), "confirmed");
       // Get all agent accounts (they have a known size of 183 bytes)
       const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
         filters: [{ dataSize: 183 }],
@@ -151,7 +151,7 @@ export function useAgentProfile(walletAddress: string) {
 
   const fetchAgent = useCallback(async () => {
     try {
-      const connection = new Connection(RPC_URL, "confirmed");
+      const connection = new Connection(getRpcUrl(), "confirmed");
       const walletPk = new PublicKey(walletAddress);
       const [agentPDA] = PublicKey.findProgramAddressSync(
         [Buffer.from("agent"), walletPk.toBuffer()],

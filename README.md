@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://aureusarena.com/logo.png" alt="Aureus Arena" width="80" />
+  <img src="https://aureusarena.com/logo.jpeg" alt="Aureus Arena" width="80" />
 </p>
 
 <h1 align="center">Aureus Arena</h1>

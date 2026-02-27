@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
+import { getRpcUrl } from "@/lib/rpc";
 
-const RPC_URL = "/api/rpc";
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID ||
     "AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn",
@@ -112,7 +112,7 @@ function readTokenBalance(data: Buffer): number {
   return Number(data.readBigUInt64LE(64));
 }
 
-export function usePoolData(lbPairAddress: string | null, pollMs = 10000) {
+export function usePoolData(lbPairAddress: string | null, pollMs = 30000) {
   const [poolData, setPoolData] = useState<PoolData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,7 +125,7 @@ export function usePoolData(lbPairAddress: string | null, pollMs = 10000) {
     }
 
     try {
-      const conn = new Connection(RPC_URL, "confirmed");
+      const conn = new Connection(getRpcUrl(), "confirmed");
       const lbPair = new PublicKey(lbPairAddress);
       const [vaultPDA] = findVaultPDA();
 

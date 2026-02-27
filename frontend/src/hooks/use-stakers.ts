@@ -2,12 +2,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
+import { getRpcUrl } from "@/lib/rpc";
 
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID ||
     "AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn",
 );
-const RPC_URL = "/api/rpc";
 
 export interface StakerData {
   /** The staker PDA address */
@@ -58,14 +58,14 @@ function deserializeStaker(d: Buffer, pda: string): StakerData | null {
   return { pda, owner, aurStaked, rewardDebt, pendingRewards, stakedAt };
 }
 
-export function useStakerLeaderboard(pollMs = 5000) {
+export function useStakerLeaderboard(pollMs = 30000) {
   const [stakers, setStakers] = useState<StakerData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchStakers = useCallback(async () => {
     try {
-      const connection = new Connection(RPC_URL, "confirmed");
+      const connection = new Connection(getRpcUrl(), "confirmed");
       // StakeState accounts are exactly 74 bytes
       const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
         filters: [{ dataSize: 74 }],

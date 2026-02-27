@@ -2,12 +2,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
+import { getRpcUrl } from "@/lib/rpc";
 
 const PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID ||
     "AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn",
 );
-const RPC_URL = "/api/rpc";
 
 const [ARENA_PDA] = PublicKey.findProgramAddressSync(
   [Buffer.from("arena")],
@@ -193,7 +193,7 @@ function deserializeArena(d: Buffer): ArenaState {
   };
 }
 
-export function useArenaState(pollMs = 3000) {
+export function useArenaState(pollMs = 30000) {
   const [arena, setArena] = useState<ArenaState | null>(null);
   const [currentSlot, setCurrentSlot] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
@@ -201,7 +201,7 @@ export function useArenaState(pollMs = 3000) {
 
   const fetchArena = useCallback(async () => {
     try {
-      const connection = new Connection(RPC_URL, "confirmed");
+      const connection = new Connection(getRpcUrl(), "confirmed");
       const [info, slot] = await Promise.all([
         connection.getAccountInfo(ARENA_PDA),
         connection.getSlot(),

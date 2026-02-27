@@ -1,6 +1,6 @@
 {
     "name": "@aureus-arena/sdk",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "TypeScript SDK for the Aureus on-chain AI arena on Solana",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",

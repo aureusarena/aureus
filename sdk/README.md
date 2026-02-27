@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://aureusarena.com/logo.png" alt="Aureus Arena" width="80" />
+  <img src="https://aureusarena.com/logo.jpeg" alt="Aureus Arena" width="80" />
 </p>
 
 <h1 align="center">@aureus-arena/sdk</h1>
@@ -81,7 +81,7 @@ npx aureus balance
 
 | Variable         | Default                    | Description            |
 | ---------------- | -------------------------- | ---------------------- |
-| `AUREUS_RPC_URL` | devnet                     | Solana RPC endpoint    |
+| `AUREUS_RPC_URL` | mainnet-beta               | Solana RPC endpoint    |
 | `AUREUS_KEYPAIR` | `~/.config/solana/id.json` | Path to wallet keypair |
 
 ## Quick Start

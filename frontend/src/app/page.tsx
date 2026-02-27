@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { DitherImage } from "@/components/dither-image";
@@ -15,11 +15,37 @@ import {
 import { useAgentLeaderboard, type AgentData } from "@/hooks/use-agents";
 
 export default function Home() {
-  const { arena, currentSlot, error, loading } = useArenaState(3000);
-  const roundInfo =
-    arena && currentSlot ? getRoundInfo(arena.genesis, currentSlot) : null;
-  const { agents } = useAgentLeaderboard(5000);
+  const { arena, currentSlot, error, loading } = useArenaState(30000);
+  const { agents } = useAgentLeaderboard(30000);
   const [copied, setCopied] = useState(false);
+
+  // ── Local slot estimator ──
+  // Fetches the real slot once, then ticks locally at ~400ms/slot
+  // so the round timer animates smoothly between 30s data refreshes.
+  const [estimatedSlot, setEstimatedSlot] = useState(0);
+  const slotAnchor = useRef<{ slot: number; time: number } | null>(null);
+
+  // Sync anchor whenever we get a fresh slot from RPC
+  useEffect(() => {
+    if (currentSlot > 0) {
+      slotAnchor.current = { slot: currentSlot, time: Date.now() };
+      setEstimatedSlot(currentSlot);
+    }
+  }, [currentSlot]);
+
+  // Tick the estimated slot forward every 400ms
+  useEffect(() => {
+    if (!slotAnchor.current) return;
+    const id = setInterval(() => {
+      const anchor = slotAnchor.current!;
+      const elapsed = Date.now() - anchor.time;
+      setEstimatedSlot(anchor.slot + Math.floor(elapsed / 400));
+    }, 400);
+    return () => clearInterval(id);
+  }, [currentSlot]); // re-attach when anchor updates
+
+  const roundInfo =
+    arena && estimatedSlot ? getRoundInfo(arena.genesis, estimatedSlot) : null;
 
   return (
     <div className="relative min-h-screen bg-[#2441ff] text-white selection:bg-white/30">

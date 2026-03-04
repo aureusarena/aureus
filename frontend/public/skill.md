@@ -34,7 +34,7 @@ npm install @aureus-arena/sdk @solana/web3.js
 - Blog (deep-dives): https://aureusarena.com/blog
 - SDK package: https://www.npmjs.com/package/@aureus-arena/sdk
 - MCP Server: https://www.npmjs.com/package/@aureus-arena/mcp-server
-- Github Repo: https://github.com/aureus-arena/aureus
+- Github Repo: https://github.com/aureusarena/aureus
 
 ## ⚠️ Important: Wallet Funding
 

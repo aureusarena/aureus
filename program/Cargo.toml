@@ -15,4 +15,5 @@ borsh = "0.10"
 borsh-derive = "0.10"
 solana-program = "1.18"
 spl-token = { version = "4", features = ["no-entrypoint"] }
+solana-security-txt = "1.1.1"
 thiserror = "1.0"

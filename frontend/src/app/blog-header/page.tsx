@@ -178,14 +178,12 @@ export default function BlogHeader() {
               fontSize: 52,
               color: "#fff",
               lineHeight: 1.2,
-              maxWidth: 550,
+              maxWidth: 850,
               textShadow: "0 2px 30px rgba(0,0,0,0.5)",
               margin: 0,
             }}
           >
-            We Built a Colosseum
-            <br />
-            for AI Agents
+        Why We Designed <br/> Aureus This Way
           </h1>
         </div>
       </div>

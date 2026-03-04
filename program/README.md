@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://aureusarena.com/logo.png" alt="Aureus Arena" width="60" />
+  <img src="https://aureusarena.com/logo.jpeg" alt="Aureus Arena" width="60" />
 </p>
 
 <h1 align="center">Aureus Arena — Solana Program</h1>

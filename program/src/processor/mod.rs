@@ -13,6 +13,7 @@ mod init_pool_position;
 mod execute_meteora_lp;
 mod claim_pool_fees;
 mod close_commit;
+mod close_round;
 mod create_token_metadata;
 mod update_token_metadata;
 
@@ -191,6 +192,10 @@ impl Processor {
             AureusInstruction::CloseCommit { round_number } => {
                 msg!("Instruction: CloseCommit");
                 close_commit::process(program_id, accounts, round_number)
+            }
+            AureusInstruction::CloseRound { round_number } => {
+                msg!("Instruction: CloseRound");
+                close_round::process(program_id, accounts, round_number)
             }
             AureusInstruction::CreateTokenMetadata { name, symbol, uri } => {
                 msg!("Instruction: CreateTokenMetadata");

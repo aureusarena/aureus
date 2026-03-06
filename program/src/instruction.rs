@@ -189,6 +189,14 @@ pub enum AureusInstruction {
     ///   1. `[writable]` Commit PDA (will be zeroed + lamports reclaimed)
     CloseCommit { round_number: u64 },
 
+    /// Close a round PDA to reclaim rent SOL.
+    /// Permissionless — anyone can close once grace period expires.
+    /// Accounts:
+    ///   0. `[signer, writable]` Payer (receives reclaimed lamports)
+    ///   1. `[writable]` Round PDA (will be zeroed + lamports reclaimed)
+    ///   2. `[]` Arena PDA (for grace period check)
+    CloseRound { round_number: u64 },
+
     /// Create/update Metaplex token metadata for the AUR mint.
     /// Authority-only. CPIs into Metaplex Token Metadata program.
     /// Accounts:

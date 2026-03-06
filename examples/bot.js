@@ -172,6 +172,18 @@ function serializeClaim(round) {
   buf.writeBigUInt64LE(BigInt(round), 1);
   return buf;
 }
+function serializeCloseCommit(round) {
+  const buf = Buffer.alloc(9);
+  buf.writeUInt8(14, 0);
+  buf.writeBigUInt64LE(BigInt(round), 1);
+  return buf;
+}
+function serializeCloseRound(round) {
+  const buf = Buffer.alloc(9);
+  buf.writeUInt8(15, 0);
+  buf.writeBigUInt64LE(BigInt(round), 1);
+  return buf;
+}
 function computeCommitment(strategy, nonce) {
   const preimage = Buffer.alloc(37);
   for (let i = 0; i < 5; i++) preimage.writeUInt8(strategy[i], i);
@@ -347,6 +359,49 @@ class ClaimQueue {
         this.totalSolClaimed += result.solWon;
         this.totalAurClaimed += result.tokensWon;
         this.queue = this.queue.filter((q) => q.round !== item.round);
+
+        // Close commit PDA to reclaim rent (~0.002 SOL)
+        try {
+          const closeCommitIx = new TransactionInstruction({
+            keys: [
+              {
+                pubkey: this.wallet.publicKey,
+                isSigner: true,
+                isWritable: true,
+              },
+              { pubkey: commitPDA, isSigner: false, isWritable: true },
+            ],
+            programId: CONFIG.programId,
+            data: serializeCloseCommit(item.round),
+          });
+          await sendTx(this.conn, new Transaction().add(closeCommitIx), [
+            this.wallet,
+          ]);
+        } catch {}
+
+        // Close round PDA to reclaim rent (~0.003 SOL)
+        try {
+          const closeRoundIx = new TransactionInstruction({
+            keys: [
+              {
+                pubkey: this.wallet.publicKey,
+                isSigner: true,
+                isWritable: true,
+              },
+              { pubkey: roundPDA, isSigner: false, isWritable: true },
+              {
+                pubkey: this.accounts.arenaPDA,
+                isSigner: false,
+                isWritable: false,
+              },
+            ],
+            programId: CONFIG.programId,
+            data: serializeCloseRound(item.round),
+          });
+          await sendTx(this.conn, new Transaction().add(closeRoundIx), [
+            this.wallet,
+          ]);
+        } catch {}
       } catch (e) {
         this.failedClaims++;
         console.log(
@@ -470,16 +525,29 @@ async function main() {
       // ── Process any pending claims while we wait ──
       await claimQueue.processReady();
 
-      // Wait for next commit phase
+      // Determine target round — commit to current round if early enough
       const slot = await conn.getSlot();
       const currentRound =
         slot < genesis ? 0 : Math.floor((slot - genesis) / SLOTS_PER_ROUND);
-      const targetRound = currentRound + 1;
-      const targetSlot = genesis + targetRound * SLOTS_PER_ROUND;
+      const slotsIntoRound = (slot - genesis) % SLOTS_PER_ROUND;
+      let targetRound, targetSlot;
+      if (slotsIntoRound < 10) {
+        targetRound = currentRound;
+        targetSlot = genesis + targetRound * SLOTS_PER_ROUND;
+      } else {
+        targetRound = currentRound + 1;
+        targetSlot = genesis + targetRound * SLOTS_PER_ROUND;
+      }
 
-      process.stdout.write(`⚔️  Round ${targetRound} | Waiting...`);
-      await waitForSlot(conn, targetSlot);
-      process.stdout.write(" ✅\n");
+      if (targetRound > currentRound) {
+        process.stdout.write(`⚔️  Round ${targetRound} | Waiting...`);
+        await waitForSlot(conn, targetSlot);
+        process.stdout.write(" ✅\n");
+      } else {
+        console.log(
+          `⚔️  Round ${targetRound} | Committing (${slotsIntoRound} slots in)`,
+        );
+      }
 
       // Select strategy (adaptive)
       const archetype = ARCHETYPES[currentArchetypeIdx];

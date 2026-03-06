@@ -139,6 +139,18 @@ function computeCommitment(strategy, nonce) {
   nonce.copy(preimage, 5);
   return crypto.createHash("sha256").update(preimage).digest();
 }
+function serializeCloseCommit(round) {
+  const buf = Buffer.alloc(9);
+  buf.writeUInt8(14, 0);
+  buf.writeBigUInt64LE(BigInt(round), 1);
+  return buf;
+}
+function serializeCloseRound(round) {
+  const buf = Buffer.alloc(9);
+  buf.writeUInt8(15, 0);
+  buf.writeBigUInt64LE(BigInt(round), 1);
+  return buf;
+}
 
 // ============================================================
 // STATE READERS
@@ -290,7 +302,7 @@ async function readCommitResult(round, walletPk) {
 // MCP SERVER
 // ============================================================
 const server = new Server(
-  { name: "aureus", version: "1.0.0" },
+  { name: "aureus", version: "1.1.0" },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -381,6 +393,33 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           round: { type: "number", description: "Round number" },
           wallet: { type: "string", description: "Agent wallet (optional)" },
+        },
+        required: ["round"],
+      },
+    },
+    {
+      name: "aureus_close_commit",
+      description:
+        "Close a claimed Commit PDA to reclaim ~0.002 SOL rent. Only the commit owner can close, and only after claiming.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          round: {
+            type: "number",
+            description: "Round number of the commit to close",
+          },
+        },
+        required: ["round"],
+      },
+    },
+    {
+      name: "aureus_close_round",
+      description:
+        "Close an expired Round PDA to reclaim ~0.003 SOL rent. Permissionless — anyone can close after the grace period.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          round: { type: "number", description: "Round number to close" },
         },
         required: ["round"],
       },
@@ -626,6 +665,82 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case "aureus_close_commit": {
+        if (!wallet)
+          return { content: [{ type: "text", text: "No wallet configured." }] };
+        const { round } = args;
+        const [commitPDA] = findCommitPDA(round, wallet.publicKey);
+        const ix = new TransactionInstruction({
+          keys: [
+            { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+            { pubkey: commitPDA, isSigner: false, isWritable: true },
+          ],
+          programId: PROGRAM_ID,
+          data: serializeCloseCommit(round),
+        });
+        const sig = await sendAndConfirmTransaction(
+          connection,
+          new Transaction().add(ix),
+          [wallet],
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  success: true,
+                  round,
+                  signature: sig,
+                  message: "Commit PDA closed, rent reclaimed.",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
+      case "aureus_close_round": {
+        if (!wallet)
+          return { content: [{ type: "text", text: "No wallet configured." }] };
+        const { round } = args;
+        const [roundPDA] = findRoundPDA(round);
+        const [arenaPDA] = findArenaPDA();
+        const ix = new TransactionInstruction({
+          keys: [
+            { pubkey: wallet.publicKey, isSigner: true, isWritable: true },
+            { pubkey: roundPDA, isSigner: false, isWritable: true },
+            { pubkey: arenaPDA, isSigner: false, isWritable: false },
+          ],
+          programId: PROGRAM_ID,
+          data: serializeCloseRound(round),
+        });
+        const sig = await sendAndConfirmTransaction(
+          connection,
+          new Transaction().add(ix),
+          [wallet],
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  success: true,
+                  round,
+                  signature: sig,
+                  message: "Round PDA closed, rent reclaimed.",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
         };
       }
 

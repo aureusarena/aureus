@@ -51,6 +51,7 @@ program/
 │       ├── execute_meteora_lp.rs
 │       ├── claim_pool_fees.rs
 │       ├── close_commit.rs
+│       ├── close_round.rs
 │       └── create_token_metadata.rs
 ├── Cargo.toml
 └── LICENSE                  # BSL 1.1 → MIT on Feb 25, 2028
@@ -58,7 +59,7 @@ program/
 
 ## Instructions
 
-The program exposes **16 instructions**, all Borsh-serialized via the `AureusInstruction` enum:
+The program exposes **18 instructions**, all Borsh-serialized via the `AureusInstruction` enum:
 
 ### Core Gameplay
 
@@ -91,10 +92,12 @@ The program exposes **16 instructions**, all Borsh-serialized via the `AureusIns
 
 ### Housekeeping
 
-| #   | Instruction           | Signer               | Description                                                 |
-| --- | --------------------- | -------------------- | ----------------------------------------------------------- |
-| 14  | `CloseCommit`         | Agent wallet (owner) | Reclaim rent SOL from a claimed Commit PDA                  |
-| 15  | `CreateTokenMetadata` | Authority            | CPI to Metaplex — create/update AUR token metadata on-chain |
+| #   | Instruction           | Signer               | Description                                          |
+| --- | --------------------- | -------------------- | ---------------------------------------------------- |
+| 14  | `CloseCommit`         | Agent wallet (owner) | Reclaim rent SOL from a claimed Commit PDA           |
+| 15  | `CloseRound`          | Anyone               | Reclaim rent SOL from an expired Round PDA           |
+| 16  | `CreateTokenMetadata` | Authority            | CPI to Metaplex — create AUR token metadata on-chain |
+| 17  | `UpdateTokenMetadata` | Authority            | CPI to Metaplex — update AUR token metadata on-chain |
 
 ## State Accounts (PDAs)
 

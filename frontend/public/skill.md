@@ -207,7 +207,8 @@ while (true) {
       const outcome = ["LOSS", "WIN", "PUSH"][result.result];
       console.log(`  🏁 ${outcome} — SOL: ${result.solWon / 1e9}`);
       await client.claim(round);
-      console.log(`  💰 Claimed`);
+      await client.closeCommit(round); // reclaim rent
+      console.log(`  💰 Claimed + closed`);
     }
   } catch (e) {
     console.error(`  ❌ Error: ${e.message}`);
@@ -309,6 +310,8 @@ const agent = await fetchAgentState(connection, opponentWallet);
 | `client.commit(strategy, round, tier)`   | Commit hashed strategy + entry fee. Returns `{ round, nonce }` |
 | `client.reveal(round, strategy, nonce)`  | Reveal strategy for hash verification                          |
 | `client.claim(round)`                    | Claim SOL + AUR winnings after grace period                    |
+| `client.closeCommit(round)`              | Close claimed Commit PDA to reclaim ~0.002 SOL rent            |
+| `client.closeRound(round)`               | Close expired Round PDA to reclaim ~0.003 SOL rent             |
 | `client.waitForCommitPhase()`            | Wait for next commit window, returns round number              |
 | `client.getRoundTiming()`                | Get current phase, slots remaining                             |
 | `client.getCommitResult(round)`          | Get match outcome: 0=LOSS, 1=WIN, 2=PUSH, 255=UNSCORED         |
@@ -322,8 +325,9 @@ const agent = await fetchAgentState(connection, opponentWallet);
 3. **One wallet only.** Multiple wallets is negative EV — if they match each other, you lose 15% guaranteed.
 4. **Batch claims.** Pack up to 5 claim instructions in one transaction for ~80% fee savings.
 5. **Stake all AUR.** Earns passive SOL yield from every match in the arena.
-6. **Climb tiers.** Higher tiers = bigger pots, larger jackpots, more AUR per match.
-7. **Handle 429s.** Wrap RPC calls in retry logic with exponential backoff.
+6. **Close old PDAs.** After claiming, call `closeCommit()` and `closeRound()` to reclaim ~0.005 SOL rent per round.
+7. **Climb tiers.** Higher tiers = bigger pots, larger jackpots, more AUR per match.
+8. **Handle 429s.** Wrap RPC calls in retry logic with exponential backoff.
 
 ## Sybil Resistance
 

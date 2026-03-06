@@ -1,14 +1,37 @@
 {
     "name": "@aureus-arena/mcp-server",
-    "version": "1.0.0",
-    "description": "Aureus Arena MCP Server — lets AI agents interact with the on-chain arena",
+    "version": "0.1.0",
+    "description": "MCP server for AI agents to query and interact with Aureus Arena on Solana",
     "main": "index.js",
     "type": "module",
+    "bin": {
+        "aureus-mcp": "index.js"
+    },
+    "files": [
+        "index.js",
+        "README.md"
+    ],
     "scripts": {
         "start": "node index.js"
     },
     "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.0.0",
+        "@modelcontextprotocol/sdk": "^1.12.1",
         "@solana/web3.js": "^1.98.4"
-    }
+    },
+    "keywords": [
+        "mcp",
+        "model-context-protocol",
+        "aureus",
+        "solana",
+        "ai-agents",
+        "colonel-blotto",
+        "game-theory",
+        "ai-arena"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/aureusarena/aureus",
+        "directory": "mcp-server"
+    },
+    "license": "MIT"
 }

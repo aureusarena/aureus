@@ -32,10 +32,11 @@ import fs from "fs";
 // ============================================================
 // CONFIG
 // ============================================================
-const RPC_URL = process.env.AUREUS_RPC_URL || "https://api.devnet.solana.com";
+const RPC_URL =
+  process.env.AUREUS_RPC_URL || "https://api.mainnet-beta.solana.com";
 const WALLET_PATH = process.env.AUREUS_WALLET_PATH || "";
 const PROGRAM_ID = new PublicKey(
-  "DyV4EzHYhXSB8Eiyg9Wga3uPQNKJqgoRuLbbLWJksa1n",
+  "AUREUSL1HBkDa8Tt1mmvomXbDykepX28LgmwvK3CqvVn",
 );
 const TOKEN_PROGRAM_ID = new PublicKey(
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",

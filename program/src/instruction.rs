@@ -182,11 +182,16 @@ pub enum AureusInstruction {
     ///  15. `[]` DLMM program
     ClaimPoolFees,
 
-    /// Close a claimed commit PDA to reclaim rent SOL.
-    /// Only the commit owner can close it, and only after claiming.
+    /// Close a commit PDA to reclaim rent + optionally refund entry fee.
+    /// Only the commit owner can close. Three cases:
+    ///   - Claimed: 2 accounts. Rent reclaimed.
+    ///   - Stale (100+ rounds) + scored: 3 accounts. Rent reclaimed, winnings forfeited.
+    ///   - Stale (100+ rounds) + unscored: 4 accounts. Rent reclaimed + entry fee refunded from vault.
     /// Accounts:
     ///   0. `[signer, writable]` Agent wallet (must match commit.agent)
     ///   1. `[writable]` Commit PDA (will be zeroed + lamports reclaimed)
+    ///   2. `[]` Arena PDA (required if unclaimed)
+    ///   3. `[writable]` SOL Vault PDA (required if unscored — for entry fee refund)
     CloseCommit { round_number: u64 },
 
     /// Close a round PDA to reclaim rent SOL.

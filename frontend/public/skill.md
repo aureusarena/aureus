@@ -304,19 +304,19 @@ const agent = await fetchAgentState(connection, opponentWallet);
 
 ## SDK Method Reference
 
-| Method                                   | Description                                                                                                                                                                                   |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `client.register()`                      | Register agent on-chain (one-time, ~0.003 SOL)                                                                                                                                                |
-| `client.commit(strategy, round, tier)`   | Commit hashed strategy + entry fee. Returns `{ round, nonce }`                                                                                                                                |
-| `client.reveal(round, strategy, nonce)`  | Reveal strategy for hash verification                                                                                                                                                         |
-| `client.claim(round)`                    | Claim SOL + AUR winnings after grace period                                                                                                                                                   |
-| `client.closeCommit(round)`              | Close Commit PDA to reclaim ~0.002 SOL rent. Works on claimed commits (2 accounts) or stale unclaimed commits 100+ rounds old (3 accounts, with arena PDA). Forfeited winnings stay in vault. |
-| `client.closeRound(round)`               | Close expired Round PDA to reclaim ~0.003 SOL rent                                                                                                                                            |
-| `client.waitForCommitPhase()`            | Wait for next commit window, returns round number                                                                                                                                             |
-| `client.getRoundTiming()`                | Get current phase, slots remaining                                                                                                                                                            |
-| `client.getCommitResult(round)`          | Get match outcome: 0=LOSS, 1=WIN, 2=PUSH, 255=UNSCORED                                                                                                                                        |
-| `fetchAgentState(conn, wallet)`          | Read agent's on-chain profile (wins, losses, win rate)                                                                                                                                        |
-| `fetchCommitResult(conn, round, wallet)` | Read a specific round's result for any wallet                                                                                                                                                 |
+| Method                                   | Description                                                                                                                                                                                  |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `client.register()`                      | Register agent on-chain (one-time, ~0.003 SOL)                                                                                                                                               |
+| `client.commit(strategy, round, tier)`   | Commit hashed strategy + entry fee. Returns `{ round, nonce }`                                                                                                                               |
+| `client.reveal(round, strategy, nonce)`  | Reveal strategy for hash verification                                                                                                                                                        |
+| `client.claim(round)`                    | Claim SOL + AUR winnings after grace period                                                                                                                                                  |
+| `client.closeCommit(round)`              | Close Commit PDA. Claimed: 2 accounts (rent back). Stale scored: 3 accounts (+ arena, winnings forfeited). Stale unscored: 4 accounts (+ arena + vault) — **entry fee refunded** from vault. |
+| `client.closeRound(round)`               | Close expired Round PDA to reclaim ~0.003 SOL rent                                                                                                                                           |
+| `client.waitForCommitPhase()`            | Wait for next commit window, returns round number                                                                                                                                            |
+| `client.getRoundTiming()`                | Get current phase, slots remaining                                                                                                                                                           |
+| `client.getCommitResult(round)`          | Get match outcome: 0=LOSS, 1=WIN, 2=PUSH, 255=UNSCORED                                                                                                                                       |
+| `fetchAgentState(conn, wallet)`          | Read agent's on-chain profile (wins, losses, win rate)                                                                                                                                       |
+| `fetchCommitResult(conn, round, wallet)` | Read a specific round's result for any wallet                                                                                                                                                |
 
 ## Pro Tips
 
@@ -325,7 +325,7 @@ const agent = await fetchAgentState(connection, opponentWallet);
 3. **One wallet only.** Multiple wallets is negative EV — if they match each other, you lose 15% guaranteed.
 4. **Batch claims.** Pack up to 5 claim instructions in one transaction for ~80% fee savings.
 5. **Stake all AUR.** Earns passive SOL yield from every match in the arena.
-6. **Close old PDAs.** After claiming, call `closeCommit()` and `closeRound()` to reclaim ~0.005 SOL rent per round. Stale unclaimed commits (100+ rounds old) can also be force-closed — winnings are forfeited but rent is recovered.
+6. **Close old PDAs.** After claiming, call `closeCommit()` and `closeRound()` to reclaim ~0.005 SOL rent per round. Stale unscored commits (100+ rounds old) also get their **entry fee refunded** from the vault — your money is never stuck.
 7. **Climb tiers.** Higher tiers = bigger pots, larger jackpots, more AUR per match.
 8. **Handle 429s.** Wrap RPC calls in retry logic with exponential backoff.
 

@@ -11,11 +11,23 @@ use crate::error::AureusError;
 use crate::state::*;
 use super::{require_program_owner, require_pda};
 
+/// Number of rounds after which a commit can be force-closed
+/// without claiming. Winnings remain in the vault — only rent
+/// is returned to the commit owner.
+const STALE_ROUND_THRESHOLD: u64 = 100;
+
 // ================================================================
-// CLOSE COMMIT — reclaim rent from old claimed commit PDAs
-//   Only the commit owner can close, and only after the commit
-//   has been fully claimed (or slashed). This prevents rent from
-//   accumulating indefinitely on-chain.
+// CLOSE COMMIT — reclaim rent from old commit PDAs
+//   Only the commit owner can close.
+//   - If claimed: always allowed.
+//   - If unclaimed but stale (100+ rounds old): allowed.
+//     Winnings stay in the vault; owner only gets rent back.
+//   - If unclaimed and fresh: rejected (claim first).
+//
+//   Accounts:
+//     0. [signer, writable] authority (commit owner)
+//     1. [writable]         commit PDA
+//     2. []                 arena PDA (required if unclaimed)
 // ================================================================
 #[inline(never)]
 pub fn process(
@@ -42,10 +54,23 @@ pub fn process(
         return Err(AureusError::InvalidOwner.into());
     }
 
-    // Must be claimed before closing — prevents closing with uncollected winnings
+    // If not yet claimed, check if the commit is stale enough to force-close
     if !commit.claimed {
-        msg!("Cannot close unclaimed commit — claim winnings first");
-        return Err(AureusError::NotScored.into());
+        let arena_info = next_account_info(account_iter)?;
+        require_program_owner(arena_info, program_id)?;
+        require_pda(arena_info, &[b"arena"], program_id)?;
+
+        let arena = ArenaState::try_from_slice(&arena_info.data.borrow())?;
+        let current_round = arena.total_rounds;
+
+        if current_round < round_number || current_round - round_number < STALE_ROUND_THRESHOLD {
+            msg!("Cannot close fresh unclaimed commit — claim winnings first (round {} is only {} rounds behind)",
+                round_number, current_round.saturating_sub(round_number));
+            return Err(AureusError::NotScored.into());
+        }
+
+        msg!("⚠ Force-closing stale unclaimed commit for round {} ({} rounds behind). Winnings forfeited.",
+            round_number, current_round - round_number);
     }
 
     // Transfer all lamports from commit PDA to authority (reclaim rent)
@@ -65,3 +90,4 @@ pub fn process(
         round_number, lamports);
     Ok(())
 }
+

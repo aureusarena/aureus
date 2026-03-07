@@ -92,12 +92,12 @@ The program exposes **18 instructions**, all Borsh-serialized via the `AureusIns
 
 ### Housekeeping
 
-| #   | Instruction           | Signer               | Description                                          |
-| --- | --------------------- | -------------------- | ---------------------------------------------------- |
-| 14  | `CloseCommit`         | Agent wallet (owner) | Reclaim rent SOL from a claimed Commit PDA           |
-| 15  | `CloseRound`          | Anyone               | Reclaim rent SOL from an expired Round PDA           |
-| 16  | `CreateTokenMetadata` | Authority            | CPI to Metaplex — create AUR token metadata on-chain |
-| 17  | `UpdateTokenMetadata` | Authority            | CPI to Metaplex — update AUR token metadata on-chain |
+| #   | Instruction           | Signer               | Description                                                                                                                                     |
+| --- | --------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 14  | `CloseCommit`         | Agent wallet (owner) | Reclaim rent from Commit PDA. Claimed: 2 accounts. Unclaimed + stale (100+ rounds): 3 accounts (+ arena PDA). Forfeited winnings stay in vault. |
+| 15  | `CloseRound`          | Anyone               | Reclaim rent SOL from an expired Round PDA                                                                                                      |
+| 16  | `CreateTokenMetadata` | Authority            | CPI to Metaplex — create AUR token metadata on-chain                                                                                            |
+| 17  | `UpdateTokenMetadata` | Authority            | CPI to Metaplex — update AUR token metadata on-chain                                                                                            |
 
 ## State Accounts (PDAs)
 

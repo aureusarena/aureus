@@ -6,6 +6,7 @@ use solana_program::{
     msg,
     program_error::ProgramError,
     pubkey::Pubkey,
+    rent::Rent,
     sysvar::Sysvar,
 };
 
@@ -14,22 +15,29 @@ use crate::state::*;
 use super::{require_program_owner, require_pda};
 
 /// Number of rounds after which a commit can be force-closed
-/// without claiming. Winnings remain in the vault — only rent
-/// is returned to the commit owner.
+/// without claiming.
 const STALE_ROUND_THRESHOLD: u64 = 100;
 
 // ================================================================
-// CLOSE COMMIT — reclaim rent from old commit PDAs
-//   Only the commit owner can close.
-//   - If claimed: always allowed (2 accounts).
-//   - If unclaimed but stale (100+ rounds old): allowed (3 accounts).
-//     Winnings stay in the vault; owner only gets rent back.
-//   - If unclaimed and fresh: rejected (claim first).
+// CLOSE COMMIT — reclaim rent + refund entry fees from old commits
+//   Only the commit owner (signer) can close their own commit.
+//
+//   Case 1: Claimed commit (2 accounts)
+//     → Reclaim rent only. Winnings already paid out.
+//
+//   Case 2: Stale unclaimed + SCORED commit (3 accounts)
+//     → Reclaim rent. Forfeited winnings stay in vault.
+//       (They chose not to claim — that's on them.)
+//
+//   Case 3: Stale unclaimed + UNSCORED commit (4 accounts)
+//     → Reclaim rent + REFUND entry fee from vault.
+//       Match never happened, so their entry fee is returned.
 //
 //   Accounts:
 //     0. [signer, writable] authority (commit owner)
 //     1. [writable]         commit PDA
-//     2. []                 arena PDA (required if unclaimed)
+//     2. []                 arena PDA   (required if unclaimed)
+//     3. [writable]         vault PDA   (required if unscored — for refund)
 // ================================================================
 #[inline(never)]
 pub fn process(
@@ -56,7 +64,7 @@ pub fn process(
         return Err(AureusError::InvalidOwner.into());
     }
 
-    // If not yet claimed, check if the commit is stale enough to force-close
+    // If not yet claimed, check staleness and handle refund
     if !commit.claimed {
         let arena_info = next_account_info(account_iter)?;
         require_program_owner(arena_info, program_id)?;
@@ -72,8 +80,33 @@ pub fn process(
             return Err(AureusError::NotScored.into());
         }
 
-        msg!("⚠ Force-closing stale unclaimed commit for round {} ({} rounds behind). Winnings forfeited.",
-            round_number, current_round - round_number);
+        // If unscored, refund the entry fee from the vault
+        if !commit.scored {
+            let vault_info = next_account_info(account_iter)?;
+            require_program_owner(vault_info, program_id)?;
+            require_pda(vault_info, &[b"sol_vault"], program_id)?;
+
+            let entry_fee = ArenaState::entry_fee_for_tier(commit.tier);
+
+            // Protect vault rent-exemption
+            let rent = Rent::get()?;
+            let min_balance = rent.minimum_balance(vault_info.data_len());
+            let vault_balance = vault_info.lamports();
+            let available = vault_balance.saturating_sub(min_balance);
+            let refund = entry_fee.min(available);
+
+            if refund > 0 {
+                **vault_info.try_borrow_mut_lamports()? -= refund;
+                **authority.try_borrow_mut_lamports()? += refund;
+                msg!("💸 Refunded {} lamports entry fee for unscored round {}", refund, round_number);
+            }
+            if refund < entry_fee {
+                msg!("⚠ Vault rent-protected: refunded {} of {} lamports", refund, entry_fee);
+            }
+        } else {
+            msg!("⚠ Force-closing stale scored-but-unclaimed commit for round {}. Winnings forfeited.",
+                round_number);
+        }
     }
 
     // Transfer all lamports from commit PDA to authority (reclaim rent)
@@ -89,9 +122,7 @@ pub fn process(
         *byte = 0;
     }
 
-    msg!("\u{1F5D1} Closed commit PDA for round {}, reclaimed {} lamports",
+    msg!("\u{1F5D1} Closed commit PDA for round {}, reclaimed {} lamports rent",
         round_number, lamports);
     Ok(())
 }
-
-

@@ -1,10 +1,12 @@
 use borsh::BorshDeserialize;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
+    clock::Clock,
     entrypoint::ProgramResult,
     msg,
     program_error::ProgramError,
     pubkey::Pubkey,
+    sysvar::Sysvar,
 };
 
 use crate::error::AureusError;
@@ -19,8 +21,8 @@ const STALE_ROUND_THRESHOLD: u64 = 100;
 // ================================================================
 // CLOSE COMMIT — reclaim rent from old commit PDAs
 //   Only the commit owner can close.
-//   - If claimed: always allowed.
-//   - If unclaimed but stale (100+ rounds old): allowed.
+//   - If claimed: always allowed (2 accounts).
+//   - If unclaimed but stale (100+ rounds old): allowed (3 accounts).
 //     Winnings stay in the vault; owner only gets rent back.
 //   - If unclaimed and fresh: rejected (claim first).
 //
@@ -61,11 +63,12 @@ pub fn process(
         require_pda(arena_info, &[b"arena"], program_id)?;
 
         let arena = ArenaState::try_from_slice(&arena_info.data.borrow())?;
-        let current_round = arena.total_rounds;
+        let clock = Clock::get()?;
+        let current_round = arena.round_for_slot(clock.slot);
 
         if current_round < round_number || current_round - round_number < STALE_ROUND_THRESHOLD {
-            msg!("Cannot close fresh unclaimed commit — claim winnings first (round {} is only {} rounds behind)",
-                round_number, current_round.saturating_sub(round_number));
+            msg!("Cannot close fresh unclaimed commit — claim winnings first (round {} is only {} rounds behind current {})",
+                round_number, current_round.saturating_sub(round_number), current_round);
             return Err(AureusError::NotScored.into());
         }
 
@@ -90,4 +93,5 @@ pub fn process(
         round_number, lamports);
     Ok(())
 }
+
 
